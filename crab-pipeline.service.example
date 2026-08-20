@@ -1,0 +1,15 @@
+[Unit]
+Description=Crab OAK measurement and OneNET upload
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/home/orangepi/crab-oak
+ExecStart=/bin/bash /home/orangepi/crab-oak/run_loop.sh 30
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime outputs
+runs/
+measurement_*.json
+onenet_mqtt_result.json
+onenet_file_upload_result.json
+calibration_plane.json
+calibration_plane.failed.json
+calibration_validation.json
+*.failed.json
+
+# Local images and debug captures
+*.jpg
+*.jpeg
+*.png
+!output/pdf/*.png
+
+# Secrets
+onenet_mqtt_config.json
+onenet_config.json
+
+# Local dependency/vendor folders
+.claude/
+oak_pydeps/
+oak_pydeps_blob/
+oak_pydeps_min/
+tmp/
+tmp_oak_export/
+__pycache__/
+print_test/
+roi_local_test/
+
+# Archives and local scratch
+*.tar.gz
+*.zip
+*.log
+*.pt
+*.onnx
+oak_export/*.blob
+!oak_export/best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob
+fix_*.ps1
+run_ics_fix_admin.bat
+list_serial_ports.py
+onenet_config.example.json
+onenet_file_upload_matrix.py
+onenet_upload.py
+weight_sensor_manual.pdf
+新建 文本文档.txt

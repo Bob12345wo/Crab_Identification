@@ -1,0 +1,20 @@
+{
+  "host": "mqtts.heclouds.com",
+  "port": 1883,
+  "product_id": "PUT_PRODUCT_ID_HERE",
+  "device_name": "PUT_DEVICE_NAME_HERE",
+  "device_key": "PUT_DEVICE_SECRET_HERE",
+  "file_access_key": "PUT_USER_OR_PRODUCT_ACCESS_KEY_HERE",
+  "token_method": "sha256",
+  "token_expire_days": 30,
+  "topic_mode": "property",
+  "payload_style": "value",
+  "file_upload_url": "https://iot-api.heclouds.com/device/file-upload",
+  "file_token_version": "2022-05-01",
+  "file_token_method": "sha1",
+  "file_key_encoding": "base64",
+  "file_url_encoding": "quote_plus",
+  "file_auth_res": "userid/PUT_NUMERIC_USER_ID_HERE",
+  "file_upload_timeout": 30,
+  "qos": 0
+}
