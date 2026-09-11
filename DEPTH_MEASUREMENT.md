@@ -1,0 +1,92 @@
+# OAK 深度与螃蟹厚度测量
+
+新增功能适用于本项目的 OAK-D Lite 双目相机和 DepthAI 3.7.1。默认关闭，使用 --depth 启用。
+
+## 测量含义与摆放
+
+输出 thickness.thickness_mm 为背壳取样区相对放置平面的垂直高度，单位毫米。
+程序将毫米深度反投影到三维，在检测框外拟合支撑平面，再计算中央背壳区域点到平面的距离，取第 90 百分位，降低孤立噪点影响。
+这不是腹壳与背壳两面的直接测量。腹部悬空、腿撑起身体或托盘背景高度不同都会使结果偏离身体实际厚度。
+
+相机固定在上方。让腹部贴近水平、哑光、有纹理的放置面，周围保留充足的同一平面。
+检测框外不要出现托盘外的低桌面、其他物品或另一只螃蟹，否则可能拟合到错误平面。
+检查调试图中的青色矩形是否落在背壳内；默认取检测框中央 35%，可通过 --depth-body-scale 调整。
+当前模型的背壳关键点定义未确认，因此不使用未知关键点自动圈定背壳。
+
+## 单次本地测量
+
+在安装好 requirements.txt 的设备上运行，不需要称重或云端连接：
+
+```bash
+python oak_crab_measure.py \
+  --blob oak_export/best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob \
+  --depth --frame-count 5 \
+  --json-out measurement_depth.json \
+  --depth-out depth_sample.npz \
+  --debug-image depth_debug.jpg
+```
+
+若 blob 在项目根目录，请相应修改 --blob。平面腿长标定 --calibration 可继续使用，但厚度独立使用深度内参及三维平面，不由二维单应矩阵推算。
+
+## 流水线与上传
+
+给原有 python crab_pipeline.py 命令追加 --depth，或执行 bash run_once.sh --depth。
+连续运行可以直接在 crab_pipeline.py 上组合 --loop --interval 30 --depth。
+把新增 crab_thickness.py 与修改后的脚本一起部署到板子。
+流水线会保存 runs/depth_时间戳.npz，测量 JSON 和 pipeline JSON 包含 thickness。
+NPZ 包含 depth_mm 和 intrinsics，分别为对齐到识别 ROI 的原始深度与对应的 3x3 内参。
+深度文件保存在本地，沿用原有 --keep 文件轮换，不会自动上传深度文件。
+
+启用深度上传前，在 OneNET 物模型新增 thickness_ok（int32，0/1）和 thickness_mm（float，毫米）。
+只有成功测量才上报 thickness_mm；失败时上报 thickness_ok=0，不发送伪造的零厚度。
+云端可能保留上一次 thickness_mm，因此必须结合 thickness_ok 判断有效性。
+未启用 --depth 时不会添加这些 MQTT 属性。RS485 二进制包保持原协议，不包含厚度。
+
+## 质量与验证
+
+启用深度后，厚度失败会使 measurement_ok=false。thickness.reason 提供原因，例如：
+
+- insufficient_support_depth：周围平面有效深度不足。
+- support_not_planar：背景不满足单一平面条件。
+- insufficient_shell_depth：背壳取样区有效深度不足。
+- shell_not_separated_from_support：背壳高度未明显超过平面噪声。
+- height_out_of_range：高度超出 --depth-max-height-mm（默认 150）。
+
+默认平面内点阈值为 --depth-plane-tolerance-mm 3，背壳有效比例至少 60%，支撑平面内点比例至少 70%。
+RGB、推理和深度采用时间同步，允许最大 40 毫秒差；30 秒无法取得同步帧则报错。
+调试图显示背壳取样范围及所选帧高度。多帧优先选择同时满足腿部与厚度质量要求的帧，未对移动中的螃蟹做跨帧平均。
+
+实际精度需要硬件验证：在同一放置面上用已知高度的哑光块进行测试，比较不同摆放位置及重复采样的偏差，并用卡尺核对螃蟹样本。
+深度空洞、反光、遮挡和相机距离会影响可用性；不要仅调宽质量阈值来获得数字。
+当前自动化测试验证合成深度的平面倾斜、缺失值、离群点及失败处理，不代表已经完成 OAK 实机精度验证。
+
+测试命令：python -m unittest discover -s tests -v
+
+
+## 无设备时可以做的工作
+
+可以先运行软件测试和参数检查：
+
+    python -m unittest discover -s tests -v
+    python oak_crab_measure.py --help
+    python crab_pipeline.py --help
+
+没有设备时可以验证算法、参数、上传队列和自动触发状态机；真实双目误差、RGB 深度对齐误差、反光表面有效率和相机掉线恢复需要设备到位后验证。
+
+设备到位后的验证提示词：
+
+    请在当前 Crab_Identification 项目上进行 OAK-D Lite 实机验证。
+    先检查相机型号、RGB 与左右双目流、DepthAI 版本和运行日志。
+    使用已知高度 10、20、30、50 mm 的哑光标准块，在放置区域中心及四角分别采集至少 10 次。
+    记录 thickness_mm、plane_rmse_mm、plane_inlier_ratio、valid_depth_ratio 和 timestamp_delta_ms。
+    计算每个高度和位置的平均误差、最大绝对误差、标准差、CV、P95 误差。
+    再使用至少 10 只真实螃蟹，用卡尺测量背壳高度并与程序值配对。
+    确认螃蟹摆放方向、腿是否悬空、背壳 ROI 是否覆盖有效区域。
+    只有误差和重复性达到项目目标后，才调整阈值并启用 OneNET thickness_mm 上报。
+    失败时保存 RGB、debug 图、depth_sample.npz 和 measurement JSON，先定位失败原因，不要直接放宽质量阈值。
+
+已保存数据可离线回放：
+
+    python replay_depth.py --depth runs/depth_xxx.npz --measurement runs/measurement_xxx.json --output replay.json
+
+这允许在没有 OAK 的情况下调整背壳 ROI、平面容差和最大高度参数。每轮代码、测试和设备接入注意事项记录在 DEVELOPMENT_LOG.md。

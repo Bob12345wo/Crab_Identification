@@ -39,5 +39,5 @@ for i in $(seq -w 1 "$COUNT"); do
   sleep 0.5
 done
 
-python analyze_repeatability.py --input-dir "$OUT_DIR"
+python analyze_repeatability.py --input-dir "$OUT_DIR" --min-samples 5
 echo "done: $OUT_DIR"

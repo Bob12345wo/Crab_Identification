@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib import request
 from urllib.parse import quote, quote_plus
 
+from upload_queue import write_json
+
 
 def hmac_digest(method: str):
     methods = {
@@ -145,7 +147,7 @@ def upload_file(config: dict, image_path: Path) -> dict:
     code = None if not isinstance(parsed, dict) else parsed.get("code")
     fid = None if not isinstance(parsed, dict) else (parsed.get("data") or {}).get("fid")
     return {
-        "ok": 200 <= status < 300 and code == 0,
+        "ok": 200 <= status < 300 and code == 0 and bool(fid),
         "url": url,
         "auth_res": res,
         "auth_version": config.get("file_token_version", "2022-05-01"),
@@ -195,7 +197,7 @@ def main() -> None:
     if args.java_url_encoding:
         config["file_url_encoding"] = "quote_plus"
     result = upload_file(config, Path(args.image))
-    Path(args.result_out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json(args.result_out, result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result.get("ok"):
         raise SystemExit(2)

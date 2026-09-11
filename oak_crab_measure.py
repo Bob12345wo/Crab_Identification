@@ -10,10 +10,14 @@ import statistics
 import struct
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 import depthai as dai
 import numpy as np
+
+from crab_thickness import add_depth_arguments, measure_thickness, validate_depth_arguments
+from upload_queue import write_json
 
 
 LEG_DEFS = [
@@ -301,7 +305,7 @@ def read_modbus_registers(port: str, baud: int, slave: int, start: int, count: i
 
     frame = struct.pack(">B B H H", slave, 0x03, start, count)
     frame += struct.pack("<H", crc16_modbus(frame))
-    with serial.Serial(port, baudrate=baud, bytesize=8, parity="N", stopbits=1, timeout=1) as ser:
+    with serial.Serial(port, baudrate=baud, bytesize=8, parity="N", stopbits=1, timeout=1, write_timeout=1) as ser:
         ser.write(frame)
         ser.flush()
         resp = ser.read(5 + count * 2)
@@ -313,6 +317,8 @@ def read_modbus_registers(port: str, baud: int, slave: int, start: int, count: i
         raise RuntimeError(f"Modbus CRC error. RX={resp.hex(' ')}")
     if resp[0] != slave or resp[1] != 0x03:
         raise RuntimeError(f"Unexpected Modbus response. RX={resp.hex(' ')}")
+    if len(resp) != 5 + count * 2 or resp[2] != count * 2:
+        raise RuntimeError(f"Unexpected Modbus register count. RX={resp.hex(' ')}")
     return [struct.unpack(">H", resp[3 + i * 2:5 + i * 2])[0] for i in range(count)]
 
 
@@ -321,6 +327,8 @@ def read_weight(port: str, baud: int, slave: int, start: int, scale: float, offs
     raw_u32 = (regs[0] << 16) | regs[1]
     raw_i32 = raw_u32 - 0x100000000 if raw_u32 & 0x80000000 else raw_u32
     precision = regs[2]
+    if not 0 <= precision <= 6:
+        raise RuntimeError(f"Invalid weight precision register: {precision}")
     status = regs[3]
     weight_g = raw_i32 / (10 ** precision) * scale + offset
     return {
@@ -350,49 +358,65 @@ def read_stable_weight(
     sample_count: int,
     interval: float,
     zero_deadband_g: float,
+    max_spread_g: float = 2.0,
+    min_samples: int = 2,
 ) -> dict:
     samples = []
+    errors = []
     for index in range(max(1, sample_count)):
-        samples.append(read_weight(port, baud, slave, start, scale, offset))
+        try:
+            sample = read_weight(port, baud, slave, start, scale, offset)
+            samples.append(sample)
+        except (OSError, RuntimeError, ValueError) as exc:
+            samples.append(None)
+            errors.append(str(exc))
         if index + 1 < sample_count:
             time.sleep(max(0.0, interval))
 
-    valid = [row for row in samples if row["valid"] and not row["overload"]]
+    valid = [row for row in samples if row and row["valid"] and not row["overload"]
+             and np.isfinite(row["weight_g"])]
     stable = [row for row in valid if row["stable"]]
-    usable = stable or valid or samples
-    selected = min(usable, key=lambda row: abs(row["weight_g"] - statistics.median(x["weight_g"] for x in usable)))
-    values = [float(row["weight_g"]) for row in usable]
+    values = [float(row["weight_g"]) for row in valid]
+    usable = stable or valid
+    median = statistics.median(row["weight_g"] for row in usable) if usable else None
+    selected = min(usable, key=lambda row: abs(row["weight_g"] - median)) if usable else {}
     result = dict(selected)
-    measured_weight_g = float(result["weight_g"])
-    corrected_weight_g = (
-        0.0
-        if measured_weight_g < 0.0 or abs(measured_weight_g) <= max(0.0, zero_deadband_g)
-        else measured_weight_g
-    )
-    result["measured_weight_g"] = measured_weight_g
-    result["weight_g"] = corrected_weight_g
-    result["zero_deadband_g"] = float(max(0.0, zero_deadband_g))
-    result["zero_corrected"] = corrected_weight_g != measured_weight_g
+    measured = float(selected["weight_g"]) if selected else None
+    spread = max(values) - min(values) if values else None
+    reasons = []
+    if len(stable) < min_samples:
+        reasons.append("insufficient_stable_samples")
+    last = samples[-1]
+    if not last or not last["valid"] or last["overload"] or not last["stable"] or not np.isfinite(last["weight_g"]):
+        reasons.append("latest_sample_invalid_or_unstable")
+    if spread is not None and spread > max_spread_g:
+        reasons.append("weight_spread_too_large")
+    if measured is not None and measured < -zero_deadband_g:
+        reasons.append("negative_weight")
+    ok = not reasons
+    corrected = (0.0 if abs(measured) <= zero_deadband_g else measured) if ok else None
     result.update(
-        {
-            "sample_count": len(samples),
-            "valid_sample_count": len(valid),
-            "stable_sample_count": len(stable),
-            "weight_min_g": min(values),
-            "weight_max_g": max(values),
-            "weight_spread_g": max(values) - min(values),
-            "samples": [
-                {
-                    "weight_g": float(row["weight_g"]),
-                    "stable": bool(row["stable"]),
-                    "valid": bool(row["valid"]),
-                    "overload": bool(row["overload"]),
-                }
-                for row in samples
-            ],
-        }
+        ok=ok, reason="ok" if ok else ",".join(reasons), timestamp=time.time(),
+        weight_g=corrected, measured_weight_g=measured,
+        zero_deadband_g=zero_deadband_g, zero_corrected=ok and corrected != measured,
+        sample_count=len(samples), valid_sample_count=len(valid), stable_sample_count=len(stable),
+        weight_min_g=min(values) if values else None, weight_max_g=max(values) if values else None,
+        weight_spread_g=spread, max_spread_g=max_spread_g, required_stable_samples=min_samples,
+        samples=[None if row is None else {
+            "weight_g": float(row["weight_g"]) if np.isfinite(row["weight_g"]) else None,
+            "stable": bool(row["stable"]), "valid": bool(row["valid"]), "overload": bool(row["overload"]),
+        } for row in samples], errors=errors,
     )
     return result
+
+
+def wait_for_message(queue, deadline):
+    while time.monotonic() < deadline:
+        message = queue.tryGet()
+        if message is not None:
+            return message
+        time.sleep(0.01)
+    raise TimeoutError("Timed out waiting for OAK frame; check camera and USB connection")
 
 
 def run_oak_frames(
@@ -403,6 +427,8 @@ def run_oak_frames(
     roi_scale: float,
     roi_center_x: float,
     roi_center_y: float,
+    depth_frames: list | None = None,
+    capture_timeout: float = 30.0,
 ) -> tuple[list[tuple[np.ndarray, np.ndarray]], dict]:
     source_size = max(input_size, int(camera_source_size))
     source_size -= source_size % 2
@@ -444,13 +470,47 @@ def run_oak_frames(
         img_out.link(nn.input)
 
         queue_size = max(2, min(int(frame_count), 8))
-        img_q = img_out.createOutputQueue(maxSize=queue_size, blocking=True)
-        q = nn.out.createOutputQueue(maxSize=queue_size, blocking=True)
+        if depth_frames is not None:
+            left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
+            right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
+            stereo = pipeline.create(dai.node.StereoDepth)
+            stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.DEFAULT)
+            stereo.setLeftRightCheck(True)
+            stereo.setSubpixel(True)
+            stereo.initialConfig.setDepthUnit(dai.LengthUnit.MILLIMETER)
+            left.requestOutput((640, 400), dai.ImgFrame.Type.GRAY8, fps=5.0).link(stereo.left)
+            right.requestOutput((640, 400), dai.ImgFrame.Type.GRAY8, fps=5.0).link(stereo.right)
+            img_out.link(stereo.inputAlignTo)
+            stereo.setOutputSize(input_size, input_size)
+            sync = pipeline.create(dai.node.Sync)
+            sync.setSyncThreshold(timedelta(milliseconds=40))
+            sync.setSyncAttempts(-1)
+            nn.passthrough.link(sync.inputs["rgb"])
+            nn.out.link(sync.inputs["nn"])
+            stereo.depth.link(sync.inputs["depth"])
+            sync_q = sync.out.createOutputQueue(maxSize=queue_size, blocking=False)
+        else:
+            img_q = nn.passthrough.createOutputQueue(maxSize=queue_size, blocking=True)
+            q = nn.out.createOutputQueue(maxSize=queue_size, blocking=True)
         pipeline.start()
         frames = []
         for _ in range(max(1, int(frame_count))):
-            frame = img_q.get().getCvFrame()
-            out = q.get()
+            deadline = time.monotonic() + capture_timeout
+            if depth_frames is not None:
+                group = wait_for_message(sync_q, deadline)
+                rgb, out, depth_msg = group["rgb"], group["nn"], group["depth"]
+                frame = rgb.getCvFrame()
+                depth = depth_msg.getFrame()
+                if depth.shape != frame.shape[:2]:
+                    raise RuntimeError("Aligned depth dimensions do not match inference image")
+                depth_frames.append({
+                    "depth": depth,
+                    "intrinsics": np.asarray(rgb.getTransformation().getIntrinsicMatrix()),
+                    "timestamp_delta_ms": abs((rgb.getTimestamp() - depth_msg.getTimestamp()).total_seconds()) * 1000,
+                })
+            else:
+                frame = wait_for_message(img_q, deadline).getCvFrame()
+                out = wait_for_message(q, deadline)
             tensor = out.getTensor(out.getAllLayerNames()[0])
             output = np.asarray(tensor[0] if tensor.ndim == 3 else tensor, dtype=np.float32)
             frames.append((output, frame))
@@ -491,7 +551,8 @@ def save_raw_image(path: str, frame: np.ndarray) -> None:
     cv2.imwrite(path, frame)
 
 
-def save_debug_image(path: str, frame: np.ndarray, pose: dict | None, kpt_conf: float) -> None:
+def save_debug_image(path: str, frame: np.ndarray, pose: dict | None, kpt_conf: float,
+                     thickness: dict | None = None) -> None:
     try:
         import cv2
     except ImportError as exc:
@@ -533,11 +594,23 @@ def save_debug_image(path: str, frame: np.ndarray, pose: dict | None, kpt_conf: 
             (0, 0, 255),
             2,
         )
+    if thickness is not None:
+        roi = thickness.get("body_roi_xyxy")
+        if roi:
+            x1, y1, x2, y2 = map(int, roi)
+            cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 255, 0), 2)
+        label = (f"Shell height: {thickness['thickness_mm']:.1f} mm" if thickness.get("ok")
+                 else "Depth: " + thickness.get("reason", "unavailable"))
+        cv2.putText(vis, label, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
     cv2.imwrite(path, vis)
 
 
 def main():
     parser = argparse.ArgumentParser()
+    add_depth_arguments(parser)
+    parser.add_argument("--depth-out", help="Save selected aligned depth and intrinsics as NPZ (requires --depth)")
+    parser.add_argument("--capture-timeout", type=float, default=30.0, help="Seconds allowed per RGB/NN/depth frame group")
+    parser.add_argument("--weight-only", action="store_true", help="Only sample weight; --json-out - emits JSON to stdout")
     parser.add_argument("--blob", default="crab_pose_best_openvino_2022.1_4shave.blob")
     parser.add_argument("--input-size", type=int, default=640)
     parser.add_argument("--conf", type=float, default=0.25)
@@ -578,7 +651,24 @@ def main():
     parser.add_argument("--weight-samples", type=int, default=3)
     parser.add_argument("--weight-sample-interval", type=float, default=0.15)
     parser.add_argument("--weight-zero-deadband", type=float, default=5.0, help="Clamp stable near-zero weight to 0 g")
+    parser.add_argument("--weight-max-spread", type=float, default=2.0)
+    parser.add_argument("--weight-min-samples", type=int, default=2)
     args = parser.parse_args()
+    validate_depth_arguments(parser, args)
+    if args.depth_out and not args.depth:
+        parser.error("--depth-out requires --depth")
+    if not np.isfinite(args.capture_timeout) or args.capture_timeout <= 0:
+        parser.error("--capture-timeout must be finite and positive")
+    if args.weight_only and not args.weight_port:
+        parser.error("--weight-only requires --weight-port")
+    if args.json_out == "-" and not args.weight_only:
+        parser.error("--json-out - requires --weight-only")
+    if args.weight_port:
+        if not 2 <= args.weight_min_samples <= args.weight_samples:
+            parser.error("Require 2 <= --weight-min-samples <= --weight-samples")
+        if any(not np.isfinite(value) or value < 0 for value in
+               (args.weight_max_spread, args.weight_zero_deadband, args.weight_sample_interval)):
+            parser.error("Weight spread, deadband and interval must be finite and nonnegative")
 
     weight = None
     if args.weight_port:
@@ -592,14 +682,21 @@ def main():
             args.weight_samples,
             args.weight_sample_interval,
             args.weight_zero_deadband,
+            args.weight_max_spread,
+            args.weight_min_samples,
         )
-        print(
-            f"Weight: raw={weight['raw']} measured={weight['measured_weight_g']:.2f}g "
-            f"weight_g={weight['weight_g']:.2f} zero_corrected={weight['zero_corrected']} "
-            f"stable={weight['stable_sample_count']}/{weight['sample_count']} "
-            f"spread={weight['weight_spread_g']:.3f}g"
-        )
+        if not args.weight_only:
+            print(f"Weight: weight_g={weight['weight_g']} ok={weight['ok']} reason={weight['reason']} "
+                  f"stable={weight['stable_sample_count']}/{weight['sample_count']} spread={weight['weight_spread_g']}")
 
+    if args.weight_only:
+        if args.json_out == "-":
+            print(json.dumps({"weight": weight}, allow_nan=False))
+        else:
+            write_json(args.json_out, {"weight": weight})
+        return
+
+    depth_frames = [] if args.depth else None
     oak_frames, camera_meta = run_oak_frames(
         args.blob,
         args.input_size,
@@ -608,6 +705,8 @@ def main():
         args.roi_scale,
         args.roi_center_x,
         args.roi_center_y,
+        depth_frames=depth_frames,
+        capture_timeout=args.capture_timeout,
     )
     homography = load_homography(args.calibration, camera_meta)
     candidates = []
@@ -632,9 +731,23 @@ def main():
             assess_leg_geometry(legs, args.max_segment_ratio, args.claw_max_segment_ratio, args.min_leg_total_px)
             if not quality["ok"]:
                 invalidate_legs(legs, "pose_quality_failed")
-        candidates.append({"index": index, "pose": pose, "quality": quality, "legs": legs, "frame": frame})
+        thickness = None
+        if args.depth:
+            thickness = {"ok": False, "thickness_mm": None, "reason": "pose_quality_failed", "unit": "mm"}
+            if quality["ok"]:
+                sample = depth_frames[index]
+                thickness = measure_thickness(sample["depth"], sample["intrinsics"], pose["bbox_xyxy"],
+                                              args.depth_body_scale, args.depth_max_height_mm,
+                                              args.depth_plane_tolerance_mm)
+                thickness["timestamp_delta_ms"] = sample["timestamp_delta_ms"]
+        candidates.append({"index": index, "pose": pose, "quality": quality, "legs": legs,
+                           "frame": frame, "thickness": thickness})
 
-    selected = max(candidates, key=candidate_rank)
+    selected = max(candidates, key=lambda row: (
+        bool(row["quality"].get("ok") and (not args.depth or row["thickness"].get("ok"))
+             and sum(1 for leg in row["legs"] if leg.get("reliable")) >= args.min_reliable_legs),
+        *candidate_rank(row),
+    ))
     selected_index = int(selected["index"])
     pose = selected["pose"]
     quality = selected["quality"]
@@ -650,6 +763,7 @@ def main():
             "index": int(row["index"]),
             "quality_ok": bool(row["quality"].get("ok")),
             "quality_reasons": row["quality"].get("reasons", []),
+            "thickness": row["thickness"],
             "reliable_leg_count": sum(1 for leg in row["legs"] if leg.get("reliable")),
             "pose_score": float((row.get("pose") or {}).get("score") or (row.get("pose") or {}).get("best_score") or 0.0),
         }
@@ -668,6 +782,7 @@ def main():
         "legs": [],
         "unit": "mm" if args.calibration else "px",
         "weight": weight,
+        "thickness": selected["thickness"],
         "capture": {
             "frame_count": len(candidates),
             "selected_frame_index": selected_index,
@@ -699,15 +814,31 @@ def main():
                 "partial_unreliable_legs:" + ",".join(result["unreliable_legs"]),
             ]
 
+    if weight is not None and not weight["ok"]:
+        result["measurement_ok"] = False
+        result["measurement_reasons"] = [*result["measurement_reasons"], "weight:" + weight["reason"]]
+
+    if args.depth:
+        thickness = result["thickness"]
+        if not thickness["ok"]:
+            result["measurement_ok"] = False
+            result["measurement_reasons"] = [*result["measurement_reasons"], "thickness:" + thickness["reason"]]
+        print(f"Thickness: {thickness['thickness_mm']} mm; status={thickness['reason']}")
+        if args.depth_out:
+            sample = depth_frames[selected_index]
+            with open(args.depth_out, "wb") as stream:
+                np.savez_compressed(stream, depth_mm=sample["depth"], intrinsics=sample["intrinsics"])
+            result["thickness"]["depth_file"] = str(args.depth_out)
+
     if args.raw_image and debug_frame is not None:
         save_raw_image(args.raw_image, debug_frame)
         print(f"Saved raw image -> {args.raw_image}")
 
     if args.debug_image and debug_frame is not None:
-        save_debug_image(args.debug_image, debug_frame, pose, args.kpt_conf)
+        save_debug_image(args.debug_image, debug_frame, pose, args.kpt_conf, selected["thickness"])
         print(f"Saved debug image -> {args.debug_image}")
 
-    Path(args.json_out).write_text(json.dumps(result, indent=2), encoding="utf-8")
+    write_json(args.json_out, result)
     print(f"Saved {args.json_out}")
 
     if result["legs"]:

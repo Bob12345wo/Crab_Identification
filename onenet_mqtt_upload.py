@@ -4,10 +4,13 @@ import hashlib
 import hmac
 import json
 import time
+import threading
 from pathlib import Path
 from urllib.parse import quote
 
 import paho.mqtt.client as mqtt
+
+from upload_queue import write_json
 
 
 LEG_KEYS = {
@@ -74,22 +77,32 @@ def compact_legs(measurement: dict) -> str:
     return text[:512]
 
 
-def build_properties(measurement: dict, image_name: str, image_fid: str, payload_style: str) -> dict:
+def build_properties(measurement: dict, image_name: str, image_fid: str, payload_style: str,
+                     include_weight_status: bool = False) -> dict:
     weight = measurement.get("weight") or {}
     image_upload = measurement.get("image_upload") or {}
     fid = image_fid or image_upload.get("fid") or ""
-    weight_g = max(0.0, float(weight.get("weight_g") or 0.0))
+    weight_ok = bool(weight and weight.get("ok", weight.get("valid", True) and not weight.get("overload", False))
+                     and weight.get("weight_g") is not None)
     raw = {
-        "weight_g": weight_g,
-        "measurement_ok": 1 if measurement.get("measurement_ok") else 0,
+        "measurement_ok": 1 if measurement.get("measurement_ok") and (not weight or weight_ok) else 0,
         "image_name": image_name[:512],
         "image_fid": str(fid)[:128],
         "legs_json": compact_legs(measurement),
     }
+    if weight_ok:
+        raw["weight_g"] = max(0.0, float(weight["weight_g"]))
+    if include_weight_status:
+        raw["weight_ok"] = int(weight_ok)
+    thickness = measurement.get("thickness")
+    if thickness is not None:
+        raw["thickness_ok"] = 1 if thickness.get("ok") else 0
+        if thickness.get("ok") and thickness.get("thickness_mm") is not None:
+            raw["thickness_mm"] = round(float(thickness["thickness_mm"]), 2)
     if payload_style == "raw":
         return raw
     if payload_style == "value":
-        ts_ms = int(time.time() * 1000)
+        ts_ms = int(float(measurement.get("timestamp") or time.time()) * 1000)
         return {key: {"value": value, "time": ts_ms} for key, value in raw.items()}
     raise ValueError(f"Unsupported payload_style: {payload_style}")
 
@@ -109,6 +122,94 @@ def build_topic(config: dict) -> str:
     return f"$sys/{product_id}/{device_name}/{suffix}"
 
 
+def publish_measurement(config, measurement, image_name, image_fid, client_factory=None):
+    measurement_id = str(measurement["measurement_id"])
+    properties = build_properties(measurement, image_name, image_fid, config.get("payload_style", "value"),
+                                  bool(config.get("include_weight_status", False)))
+    image_fid = str(image_fid or (measurement.get("image_upload") or {}).get("fid") or "")
+    topic = build_topic(config)
+    reply_topics = [f"{topic}/reply", f"{topic}_reply"]
+    # Retries of the same record/image pair reuse the request ID.
+    request_id = str(int(hashlib.sha256(f"{measurement_id}|{image_fid}".encode()).hexdigest()[:15], 16))
+    payload = {"id": request_id, "version": "1.0", "params": properties}
+    result = {"ok": False, "measurement_id": measurement_id, "image_fid": image_fid,
+              "platform_accepted": False, "reply_codes": [], "replies": [],
+              "topic": topic, "reply_topics": reply_topics, "payload": payload, "properties": properties}
+    connected, subscribed, replied = threading.Event(), threading.Event(), threading.Event()
+    connection = {"connected": False, "rc": None, "subscribed": False}
+
+    def on_connect(client, userdata, flags, rc):
+        connection.update(connected=rc == 0, rc=int(rc))
+        connected.set()
+        if rc == 0:
+            client.subscribe([(reply_topic, int(config.get("qos", 0))) for reply_topic in reply_topics])
+
+    def on_subscribe(client, userdata, mid, granted_qos):
+        connection["subscribed"] = bool(granted_qos) and all(int(code) < 128 for code in granted_qos)
+        subscribed.set()
+
+    def on_message(client, userdata, msg):
+        if msg.topic not in reply_topics:
+            return
+        try:
+            body = json.loads(msg.payload.decode("utf-8"))
+            if not isinstance(body, dict) or str(body.get("id")) != request_id or "code" not in body:
+                return
+            code = int(body["code"])
+        except (UnicodeError, ValueError, TypeError):
+            return
+        if replied.is_set():
+            return
+        result["reply_codes"].append(code)
+        result["replies"].append({"topic": msg.topic, "payload": json.dumps(body)})
+        result["platform_accepted"] = code == 200
+        replied.set()
+
+    client = None
+    try:
+        timeout = float(config.get("mqtt_timeout", 30))
+        if not 0 < timeout < float("inf"):
+            raise ValueError("mqtt_timeout must be finite and positive")
+        deadline = time.monotonic() + timeout
+
+        def remaining():
+            return max(0.0, deadline - time.monotonic())
+
+        client = (client_factory or mqtt.Client)(client_id=config["device_name"], protocol=mqtt.MQTTv311)
+        client.on_connect, client.on_subscribe, client.on_message = on_connect, on_subscribe, on_message
+        client.connect_timeout = min(timeout, 10.0)
+        token = make_token(config["product_id"], config["device_name"], config["device_key"],
+                           config.get("token_method", "sha256"), int(config.get("token_expire_days", 30)))
+        client.username_pw_set(username=config["product_id"], password=token)
+        client.connect(config.get("host", "mqtts.heclouds.com"), int(config.get("port", 1883)), keepalive=60)
+        client.loop_start()
+        if not connected.wait(remaining()) or not connection["connected"]:
+            raise RuntimeError(f"MQTT connection failed: {connection}")
+        if not subscribed.wait(remaining()) or not connection["subscribed"]:
+            raise RuntimeError("MQTT reply subscription not acknowledged")
+        info = client.publish(topic, json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
+                              qos=int(config.get("qos", 0)))
+        result["rc"] = int(info.rc)
+        info.wait_for_publish(timeout=remaining())
+        if info.rc != mqtt.MQTT_ERR_SUCCESS or not info.is_published():
+            raise RuntimeError("MQTT message was not published before timeout")
+        if not replied.wait(remaining()):
+            raise RuntimeError("Timed out waiting for matching MQTT reply ID")
+        result["ok"] = bool(result["platform_accepted"])
+        if not result["ok"]:
+            result["error"] = "Platform rejected this request"
+    except Exception as exc:
+        result["error"] = str(exc)
+    finally:
+        result["connect"] = connection
+        if client is not None:
+            try:
+                client.disconnect()
+            finally:
+                client.loop_stop()
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="onenet_mqtt_config.json")
@@ -117,88 +218,13 @@ def main() -> None:
     parser.add_argument("--image-fid", default="")
     parser.add_argument("--result-out", default="onenet_mqtt_result.json")
     args = parser.parse_args()
-
     config = json.loads(Path(args.config).read_text(encoding="utf-8"))
     measurement = json.loads(Path(args.measurement).read_text(encoding="utf-8"))
-    image_name = Path(args.image).name if args.image else ""
-    properties = build_properties(measurement, image_name, args.image_fid, config.get("payload_style", "value"))
-
-    product_id = config["product_id"]
-    device_name = config["device_name"]
-    token = make_token(
-        product_id=product_id,
-        device_name=device_name,
-        device_key=config["device_key"],
-        method=config.get("token_method", "sha256"),
-        expire_days=int(config.get("token_expire_days", 30)),
-    )
-    topic = build_topic(config)
-    reply_topics = [f"{topic}/reply", f"{topic}_reply"]
-    payload = {
-        "id": str(int(time.time() * 1000)),
-        "version": "1.0",
-        "params": properties,
-    }
-
-    replies = []
-    connection = {"connected": False, "rc": None}
-
-    def on_connect(client, userdata, flags, rc):
-        connection["connected"] = rc == 0
-        connection["rc"] = int(rc)
-        for reply_topic in reply_topics:
-            client.subscribe(reply_topic, qos=int(config.get("qos", 0)))
-
-    def on_message(client, userdata, msg):
-        try:
-            body = msg.payload.decode("utf-8", errors="replace")
-        except Exception:
-            body = repr(msg.payload)
-        replies.append({"topic": msg.topic, "payload": body})
-
-    client = mqtt.Client(client_id=device_name, protocol=mqtt.MQTTv311)
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.username_pw_set(username=product_id, password=token)
-    client.connect(config.get("host", "mqtts.heclouds.com"), int(config.get("port", 1883)), keepalive=60)
-    client.loop_start()
-    deadline = time.time() + 10
-    while connection["rc"] is None and time.time() < deadline:
-        time.sleep(0.1)
-    if not connection["connected"]:
-        raise RuntimeError(f"MQTT connect failed: {connection}")
-    info = client.publish(topic, json.dumps(payload, separators=(",", ":"), ensure_ascii=False), qos=int(config.get("qos", 0)))
-    info.wait_for_publish(timeout=10)
-    time.sleep(2)
-    client.loop_stop()
-    client.disconnect()
-
-    reply_codes = []
-    for reply in replies:
-        try:
-            body = json.loads(reply["payload"])
-            if "code" in body:
-                reply_codes.append(int(body["code"]))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-    platform_accepted = 200 in reply_codes
-
-    result = {
-        "ok": info.rc == mqtt.MQTT_ERR_SUCCESS and platform_accepted,
-        "rc": int(info.rc),
-        "platform_accepted": platform_accepted,
-        "reply_codes": reply_codes,
-        "host": config.get("host", "mqtts.heclouds.com"),
-        "port": int(config.get("port", 1883)),
-        "connect": connection,
-        "topic": topic,
-        "reply_topics": reply_topics,
-        "replies": replies,
-        "payload": payload,
-        "properties": properties,
-    }
-    Path(args.result_out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = publish_measurement(config, measurement, Path(args.image).name if args.image else "", args.image_fid)
+    write_json(args.result_out, result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if not result["ok"]:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

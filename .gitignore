@@ -2,10 +2,13 @@
 __pycache__/
 *.py[cod]
 .venv/
+.test-deps/
+.cache/depthai/
 venv/
 
 # Runtime outputs
 runs/
+depth_*.npz
 measurement_*.json
 onenet_mqtt_result.json
 onenet_file_upload_result.json

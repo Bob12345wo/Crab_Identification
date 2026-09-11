@@ -32,4 +32,5 @@ python crab_pipeline.py \
   --config onenet_mqtt_config.json \
   --out-dir runs \
   --debug \
-  --keep 300
+  --keep 300 \
+  "$@"

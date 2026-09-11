@@ -1,5 +1,7 @@
 # 螃蟹腿部识别项目
 
+新增 OAK 双目深度厚度测量：使用 `--depth` 启用，参见 [深度测量与现场验证说明](DEPTH_MEASUREMENT.md)。
+
 本项目用于在 Orange Pi Zero 3 + OAK-D Lite FF 上完成螃蟹图像采集、YOLO Pose 腿部关键点识别、称重模块读取、毫米/像素腿长计算，并将结果和原始图片上传到 OneNET。
 
 当前主流程已经打通：
@@ -108,6 +110,7 @@ sudo udevadm trigger
 ```text
 best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob
 oak_crab_measure.py
+crab_thickness.py
 crab_pipeline.py
 read_weight_modbus.py
 onenet_mqtt_upload.py
@@ -148,7 +151,7 @@ onenet_mqtt_config.json
 在 Windows PowerShell 中执行，按你的实际 IP 修改：
 
 ```powershell
-scp oak_crab_measure.py crab_pipeline.py read_weight_modbus.py onenet_mqtt_upload.py onenet_file_upload.py analyze_repeatability.py calibrate_plane.py validate_plane.py run_once.sh run_loop.sh run_repeatability.sh requirements.txt orangepi@172.20.10.2:~/crab-oak/
+scp oak_crab_measure.py crab_thickness.py crab_pipeline.py read_weight_modbus.py onenet_mqtt_upload.py onenet_file_upload.py analyze_repeatability.py calibrate_plane.py validate_plane.py run_once.sh run_loop.sh run_repeatability.sh requirements.txt orangepi@172.20.10.2:~/crab-oak/
 scp oak_export\best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob orangepi@172.20.10.2:~/crab-oak/
 scp onenet_mqtt_config.example.json orangepi@172.20.10.2:~/crab-oak/onenet_mqtt_config.json
 ```
@@ -496,4 +499,3 @@ sudo systemctl stop crab-pipeline.service
 ```
 
 正式部署前建议先把 `crab-pipeline.service.example` 里的 `ExecStart` 改成和 `run_once.sh` 一致的参数，避免后台运行和手动运行配置不一致。
-
