@@ -35,11 +35,12 @@
 ```powershell
 arp -a
 ```
+请将电脑或手机热点配置为板子实际使用的 Wi-Fi。Wi-Fi 名称和密码不要写入公开仓库。
 
 如果是 iPhone 热点，常见地址类似 `172.20.10.x`。找到板子后登录：
 
 ```powershell
-ssh orangepi@172.20.10.2
+ssh orangepi@<板子IP>
 ```
 
 如果重刷系统后提示 host key 变化，在 Windows PowerShell 执行：
