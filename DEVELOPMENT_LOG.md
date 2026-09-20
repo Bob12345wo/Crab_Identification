@@ -56,3 +56,19 @@
 - 自动化测试从 14 项增加到 22 项，全部通过。
 - 覆盖 YOLO 张量布局、非有限检测、关键点置信度、NN 输出形状、标准块参考误差和异常帧汇总。
 - 当前仍未进行真实螃蟹、真实 OAK 连接、称重模块、RS485 和 OneNET 网络验证。
+
+### 本轮厚度校准优化
+
+- 新增 `thickness_calibration.py` 和 `calibrate_thickness.py`，支持从多个标准块结果拟合有边界的线性系统误差校准。
+- 新增 `depth_thickness_calibration.json`，当前使用同一台 OAK 的 20 mm、30 mm 标准块结果拟合；有效原始范围为 18.5625--26.0770 mm，默认禁止外推。
+- 测量结果同时保留 `raw_thickness_mm`、`calibrated_thickness_mm` 和 `reported_thickness_mm`，并保留校准前的 `raw_ok` 与质量原因，避免把系统偏差误认为深度质量通过。
+- 10 mm 样本低于当前深度分辨率时明确报告 `thickness_below_depth_resolution`；不再把该情况误解为普通参考误差。
+- `test_depth_block.py`、`replay_depth.py`、实时 OAK 流程和 OneNET 上报均支持 `--thickness-calibration`；OneNET 使用 `reported_thickness_mm`。
+
+### 本轮真实数据验证
+
+- 20 mm 标准块：原始中位数 18.5625 mm，9/10 帧有效，校准后约 20.0000 mm，离线结果通过。
+- 30 mm 标准块：原始中位数 26.0770 mm，10/10 帧有效；原始结果因系统偏差触发 `reference_error_too_high`，校准后约 30.0000 mm，离线结果通过。
+- 10 mm 标准块：当前样本无法稳定区分背壳与支撑平面，作为分辨率诊断保留，不参与本次校准。
+- 自动化测试扩展到 30 项，覆盖线性校准、范围保护、原始诊断保留、低分辨率状态和 OneNET 最终值选择。
+- 尚未完成真实螃蟹厚度、换设备/换安装位置后的重新校准、50 mm 标准块和 OneNET 实机验证。只要更换相机、安装位置、分辨率、Depth 参数、ROI 或测量平面，就必须重新采集标准块并生成校准配置。

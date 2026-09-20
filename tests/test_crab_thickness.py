@@ -50,7 +50,9 @@ class ThicknessTests(unittest.TestCase):
 
     def test_empty_plane_is_not_zero_thickness(self):
         result = measure_thickness(self.scene(0), self.matrix, self.bbox)
-        self.assertEqual(result['reason'], 'shell_not_separated_from_support')
+        self.assertEqual(result['reason'], 'thickness_below_depth_resolution')
+        self.assertEqual(result['resolution_status'], 'below_depth_resolution')
+        self.assertEqual(result['legacy_reason'], 'shell_not_separated_from_support')
         self.assertIsNone(result['thickness_mm'])
 
     def test_excessive_height_is_rejected(self):

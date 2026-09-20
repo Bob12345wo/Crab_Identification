@@ -1,5 +1,7 @@
 """Estimate support-plane-to-shell height from RGB-aligned metric depth."""
 
+from pathlib import Path
+
 import numpy as np
 
 
@@ -9,6 +11,11 @@ def add_depth_arguments(parser):
                         help="Central fraction of detection bbox used as shell ROI (0, 1]")
     parser.add_argument("--depth-max-height-mm", type=float, default=150.0)
     parser.add_argument("--depth-plane-tolerance-mm", type=float, default=3.0)
+    parser.add_argument(
+        "--thickness-calibration",
+        default=None,
+        help="Bounded linear calibration JSON for OAK thickness (raw depth remains in the report)",
+    )
 
 
 def validate_depth_arguments(parser, args):
@@ -18,6 +25,8 @@ def validate_depth_arguments(parser, args):
         value = getattr(args, name)
         if not np.isfinite(value) or value <= 0:
             parser.error(f"--{name.replace('_', '-')} must be finite and positive")
+    if args.thickness_calibration and not Path(args.thickness_calibration).is_file():
+        parser.error(f"Thickness calibration file does not exist: {args.thickness_calibration}")
 
 
 def measure_thickness(depth, intrinsics, bbox, body_scale=0.35,
@@ -102,11 +111,21 @@ def measure_thickness(depth, intrinsics, bbox, body_scale=0.35,
     elevations = (project(body & valid) - center) @ normal
     # Do not discard out-of-range points before calculating the upper quantile.
     value = float(np.percentile(elevations, 90))
+    resolution_limit = plane_tolerance_mm * 2
+    separation_ratio = float(np.mean(elevations > resolution_limit))
     result["surface_depth_mm"] = float(np.median(depth[body & valid]))
-    if np.mean(elevations > plane_tolerance_mm * 2) < 0.5:
-        result["reason"] = "shell_not_separated_from_support"
+    result["surface_elevation_p90_mm"] = value
+    result["resolution_limit_mm"] = float(resolution_limit)
+    result["shell_separation_ratio"] = separation_ratio
+    if separation_ratio < 0.5:
+        result.update(
+            reason="thickness_below_depth_resolution",
+            resolution_status="below_depth_resolution",
+            legacy_reason="shell_not_separated_from_support",
+        )
     elif not plane_tolerance_mm * 2 < value <= max_height_mm:
         result["reason"] = "height_out_of_range"
+        result["resolution_status"] = "resolved_but_out_of_range"
     else:
-        result.update(ok=True, thickness_mm=value, reason="ok")
+        result.update(ok=True, thickness_mm=value, reason="ok", resolution_status="resolved")
     return result

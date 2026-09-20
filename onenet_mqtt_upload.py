@@ -97,8 +97,9 @@ def build_properties(measurement: dict, image_name: str, image_fid: str, payload
     thickness = measurement.get("thickness")
     if thickness is not None:
         raw["thickness_ok"] = 1 if thickness.get("ok") else 0
-        if thickness.get("ok") and thickness.get("thickness_mm") is not None:
-            raw["thickness_mm"] = round(float(thickness["thickness_mm"]), 2)
+        reported = thickness.get("reported_thickness_mm", thickness.get("thickness_mm"))
+        if thickness.get("ok") and reported is not None:
+            raw["thickness_mm"] = round(float(reported), 2)
     if payload_style == "raw":
         return raw
     if payload_style == "value":

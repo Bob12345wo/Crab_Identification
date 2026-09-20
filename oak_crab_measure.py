@@ -17,6 +17,7 @@ import depthai as dai
 import numpy as np
 
 from crab_thickness import add_depth_arguments, measure_thickness, validate_depth_arguments
+from thickness_calibration import CalibrationError, attach_thickness_calibration, load_calibration
 from upload_queue import write_json
 
 
@@ -689,8 +690,14 @@ def save_debug_image(path: str, frame: np.ndarray, pose: dict | None, kpt_conf: 
         if roi:
             x1, y1, x2, y2 = map(int, roi)
             cv2.rectangle(vis, (x1, y1), (x2, y2), (255, 255, 0), 2)
-        label = (f"Shell height: {thickness['thickness_mm']:.1f} mm" if thickness.get("ok")
-                 else "Depth: " + thickness.get("reason", "unavailable"))
+        reported = thickness.get("reported_thickness_mm")
+        raw = thickness.get("raw_thickness_mm", thickness.get("thickness_mm"))
+        if thickness.get("ok") and reported is not None and raw is not None and abs(reported - raw) > 0.01:
+            label = f"Shell: {reported:.1f} mm (raw {raw:.1f})"
+        elif thickness.get("ok") and thickness.get("thickness_mm") is not None:
+            label = f"Shell height: {thickness['thickness_mm']:.1f} mm"
+        else:
+            label = "Depth: " + thickness.get("reason", "unavailable")
         cv2.putText(vis, label, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
     cv2.imwrite(path, vis)
 
@@ -763,6 +770,13 @@ def main():
         parser.error("invalid frame count or ROI settings")
     if args.calibration and not Path(args.calibration).is_file():
         parser.error(f"Calibration file does not exist: {args.calibration}")
+    try:
+        thickness_calibration = (
+            load_calibration(args.thickness_calibration)
+            if args.thickness_calibration else None
+        )
+    except CalibrationError as exc:
+        parser.error(f"Invalid thickness calibration: {exc}")
     if args.depth_out and not args.depth:
         parser.error("--depth-out requires --depth")
     if not np.isfinite(args.capture_timeout) or args.capture_timeout <= 0:
@@ -849,6 +863,7 @@ def main():
                                               args.depth_body_scale, args.depth_max_height_mm,
                                               args.depth_plane_tolerance_mm)
                 thickness["timestamp_delta_ms"] = sample["timestamp_delta_ms"]
+            attach_thickness_calibration(thickness, thickness_calibration)
         candidates.append({"index": index, "pose": pose, "quality": quality, "legs": legs,
                            "frame": frame, "thickness": thickness,
                            "required_reliable_legs": args.min_reliable_legs})
@@ -934,7 +949,11 @@ def main():
         if not thickness["ok"]:
             result["measurement_ok"] = False
             result["measurement_reasons"] = [*result["measurement_reasons"], "thickness:" + thickness["reason"]]
-        print(f"Thickness: {thickness['thickness_mm']} mm; status={thickness['reason']}")
+        print(
+            f"Thickness: raw={thickness.get('raw_thickness_mm')} mm; "
+            f"calibrated={thickness.get('calibrated_thickness_mm')} mm; "
+            f"status={thickness['reason']}"
+        )
         if args.depth_out:
             sample = depth_frames[selected_index]
             with open(args.depth_out, "wb") as stream:

@@ -112,6 +112,9 @@ sudo udevadm trigger
 best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob
 oak_crab_measure.py
 crab_thickness.py
+thickness_calibration.py
+calibrate_thickness.py
+depth_thickness_calibration.json
 crab_pipeline.py
 read_weight_modbus.py
 onenet_mqtt_upload.py
@@ -152,7 +155,7 @@ onenet_mqtt_config.json
 在 Windows PowerShell 中执行，按你的实际 IP 修改：
 
 ```powershell
-scp oak_crab_measure.py crab_thickness.py crab_pipeline.py read_weight_modbus.py onenet_mqtt_upload.py onenet_file_upload.py analyze_repeatability.py calibrate_plane.py validate_plane.py run_once.sh run_loop.sh run_repeatability.sh requirements.txt orangepi@172.20.10.2:~/crab-oak/
+scp oak_crab_measure.py crab_thickness.py thickness_calibration.py calibrate_thickness.py depth_thickness_calibration.json crab_pipeline.py read_weight_modbus.py onenet_mqtt_upload.py onenet_file_upload.py analyze_repeatability.py calibrate_plane.py validate_plane.py run_once.sh run_loop.sh run_repeatability.sh requirements.txt orangepi@172.20.10.2:~/crab-oak/
 scp oak_export\best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob orangepi@172.20.10.2:~/crab-oak/
 scp onenet_mqtt_config.example.json orangepi@172.20.10.2:~/crab-oak/onenet_mqtt_config.json
 ```
@@ -181,6 +184,8 @@ chmod +x run_once.sh run_loop.sh run_repeatability.sh
 | --- | --- | --- | --- | --- |
 | `weight_g` | float | 0-10000, step 0.01, unit g | 只读 | 重量 |
 | `measurement_ok` | int32 | 0-1 | 只读 | 本次测量是否满足质量门限 |
+| `thickness_ok` | int32 | 0-1 | 只读 | 厚度是否满足深度和校准质量门限 |
+| `thickness_mm` | float | 厚度毫米 | 只读 | 启用校准时为最终 reported_thickness_mm |
 | `image_name` | string | 512 | 只读 | 上传图片文件名 |
 | `image_fid` | string | 128 | 只读 | OneNET 文件管理返回的文件 ID |
 | `legs_json` | string | 512 | 只读 | 精简腿长数据 |
@@ -276,6 +281,12 @@ source .venv/bin/activate
 ./run_once.sh
 ```
 
+启用 OAK 厚度和当前系统误差校准：
+
+```bash
+./run_once.sh --depth --thickness-calibration depth_thickness_calibration.json
+```
+
 运行后会做这些事：
 
 1. OAK 采集 5 帧。
@@ -334,6 +345,8 @@ OneNET 控制台查看：
 - 设备接入管理 -> 设备管理 -> 选择设备 -> 属性。
 - `weight_g` 看重量。
 - `measurement_ok` 看本次是否通过质量门限。
+- `thickness_ok` 看厚度是否通过深度质量和校准范围检查。
+- `thickness_mm` 为最终上报厚度；原始值和校准诊断保存在本地 measurement JSON。
 - `image_name` 看上传文件名。
 - `image_fid` 用于在文件管理/下载接口定位图片。
 - `legs_json` 是精简腿长数据。

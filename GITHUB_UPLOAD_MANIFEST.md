@@ -11,12 +11,16 @@ requirements.txt
 GITHUB_UPLOAD_MANIFEST.md
 oak_crab_measure.py
 crab_thickness.py
+thickness_calibration.py
+calibrate_thickness.py
+depth_thickness_calibration.json
 test_depth_block.py
 replay_depth.py
 upload_queue.py
 weight_trigger.py
 DEPTH_MEASUREMENT.md
 tests/test_crab_thickness.py
+tests/test_thickness_calibration.py
 tests/test_depth_integration.py
 tests/test_pose_quality.py
 tests/test_block_depth_cli.py

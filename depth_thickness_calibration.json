@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "enabled": true,
+  "model": "linear",
+  "scale": 1.3307500944624837,
+  "offset_mm": -4.702001725481672,
+  "valid_raw_range_mm": [
+    18.562464754480683,
+    26.077023680015976
+  ],
+  "valid_actual_range_mm": [
+    20.0,
+    30.0
+  ],
+  "allow_extrapolation": false,
+  "reference_points": [
+    {
+      "actual_mm": 20.0,
+      "measured_mm": 18.562464754480683,
+      "source": "block_20mm_result.json"
+    },
+    {
+      "actual_mm": 30.0,
+      "measured_mm": 26.077023680015976,
+      "source": "block_30mm_result.json"
+    }
+  ],
+  "fit": {
+    "point_count": 2,
+    "rmse_mm": 1.8115356374411762e-14,
+    "max_abs_residual_mm": 2.1316282072803006e-14
+  },
+  "calibration_scope": "Valid only for the same OAK device, mounting position, RGB/depth ROI, resolution, depth settings, and measurement plane used for the reference blocks.",
+  "quality_warnings": [
+    "reference_error_too_high_accepted_for_systematic_bias_fit"
+  ]
+}

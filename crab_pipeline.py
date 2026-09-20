@@ -122,6 +122,8 @@ def run_once(args: argparse.Namespace) -> Path:
                         "--depth-max-height-mm", str(args.depth_max_height_mm),
                         "--depth-plane-tolerance-mm", str(args.depth_plane_tolerance_mm),
                         "--depth-out", str(out_dir / f"depth_{stamp}.npz")]
+        if args.thickness_calibration:
+            measure_cmd += ["--thickness-calibration", args.thickness_calibration]
     if args.weight_port:
         measure_cmd += [
             "--weight-port",

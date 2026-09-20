@@ -9,6 +9,7 @@ import time
 import numpy as np
 
 from crab_thickness import measure_thickness
+from thickness_calibration import CalibrationError, attach_thickness_calibration, load_calibration
 
 
 def summarize_frame_results(frame_results, expected_height_mm, min_valid_ratio,
@@ -67,6 +68,9 @@ def summarize_frame_results(frame_results, expected_height_mm, min_valid_ratio,
                 reasons.append("reference_error_too_high")
     else:
         result["expected_height_mm"] = expected_height_mm
+        frame_reasons = [row.get("reason") for row in frame_results]
+        if frame_reasons and all(reason == "thickness_below_depth_resolution" for reason in frame_reasons):
+            reasons = ["thickness_below_depth_resolution"]
 
     result["quality_reasons"] = reasons
     result["reason"] = "ok" if not reasons else ";".join(reasons)
@@ -169,6 +173,13 @@ def analyze(args):
         if delta is not None:
             row['timestamp_delta_ms'] = float(delta[index])
         frame_results.append(row)
+    try:
+        thickness_calibration = (
+            load_calibration(args.thickness_calibration)
+            if args.thickness_calibration else None
+        )
+    except CalibrationError as exc:
+        raise SystemExit(f'Invalid thickness calibration: {exc}') from exc
     result = summarize_frame_results(
         frame_results,
         args.height_mm,
@@ -176,6 +187,7 @@ def analyze(args):
         args.max_frame_spread_mm,
         args.max_error_mm,
     )
+    attach_thickness_calibration(result, thickness_calibration, args.max_error_mm)
     result.update({
         'unit': 'mm',
         'bbox_xyxy': args.bbox,
@@ -206,6 +218,8 @@ def main():
                         help='Maximum valid-frame thickness range')
     parser.add_argument('--max-error-mm', type=float, default=2.,
                         help='Maximum error against --height-mm')
+    parser.add_argument('--thickness-calibration', type=Path,
+                        help='Bounded linear calibration JSON for raw OAK thickness')
     parser.add_argument('--frames', type=int, default=5)
     parser.add_argument('--warmup-frames', type=int, default=15,
                         help='Discard initial synchronized frames while stereo depth settles')
@@ -232,6 +246,8 @@ def main():
         parser.error('--max-error-mm must be finite and positive')
     if args.height_mm is not None and (not np.isfinite(args.height_mm) or args.height_mm <= 0):
         parser.error('--height-mm must be positive')
+    if args.thickness_calibration is not None and not args.thickness_calibration.is_file():
+        parser.error(f'Thickness calibration file does not exist: {args.thickness_calibration}')
     if args.capture:
         capture(args)
     elif not args.depth.exists():

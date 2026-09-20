@@ -27,13 +27,55 @@ python test_depth_block.py --depth block_depth.npz --bbox 250 260 380 390 --heig
 结果保存在 `block_result.json`：`thickness_mm` 是有效帧估计高度的中位数，`error_mm` 是相对卡尺读数的误差，`std_mm` 和 `range_mm` 是同一次采集的帧间波动，`valid_depth_ratio` 是方块中央采样区平均有效深度比例，`plane_inlier_ratio` 和 `plane_rmse_mm` 反映周围平面质量。`frames` 列出每一帧的结果，至少 80% 帧有效才会给出有效汇总高度。若 `ok=false`，先检查每帧 `reason`，不要直接放宽阈值。这里的中央取样区默认占方块外接框宽高的 35%，可用 `--body-scale` 调整；测试方块时应确保该区域完全落在方块平坦顶面。
 `thickness_mm` 使用有效帧中位数，`mean_thickness_mm` 保留均值用于诊断；默认要求至少 80% 帧有效、有效帧极差不超过 5 mm、与 `--height-mm` 的误差不超过 2 mm。误差超限时仍会保存厚度值，并将 `reason` 标为 `reference_error_too_high`，便于定位系统误差。
 
+## 厚度系统误差校准
+
+标准块验证发现，当前 OAK、安装位置、RGB/Depth ROI 和测量平面下存在稳定的系统偏差。校准工具只拟合已知标准块的系统误差，不会替代平面质量、深度有效率和帧稳定性检查。
+
+使用已经采集的 20 mm 和 30 mm 结果生成配置：
+
+```bash
+python calibrate_thickness.py \
+  --result block_20mm_result.json \
+  --result block_30mm_result.json \
+  --output depth_thickness_calibration.json
+```
+
+当前仓库中的配置由同一台 OAK 和同一套摆放参数得到，关系为：
+
+```text
+calibrated_mm = 1.3307500944624837 * raw_mm - 4.702001725481672
+raw_mm valid range = 18.562464754480683 .. 26.077023680015976
+```
+
+该配置只适用于生成它的相机、安装位置、分辨率、Depth 设置、RGB/Depth ROI 和测量平面。默认禁止外推：原始厚度落在校准范围外时，结果会标记 `thickness_calibration_out_of_range`，不会输出未经验证的修正值。没有 50 mm 标准块也可以先完成 20/30 mm 两点校准；这只能修正当前范围内的线性系统偏差，后续拿到第三个高度时应重新拟合并检查残差。
+
+离线使用校准配置：
+
+```bash
+python test_depth_block.py \
+  --depth block_20mm_depth.npz \
+  --bbox 304 265 365 327 \
+  --height-mm 20 \
+  --thickness-calibration depth_thickness_calibration.json
+```
+
+测量 JSON 同时保留原始值和最终值：
+
+- `thickness_mm`、`raw_thickness_mm`：未校准的深度几何结果，用于诊断兼容性。
+- `calibrated_thickness_mm`：应用校准后的结果。
+- `reported_thickness_mm`：系统和 OneNET 应使用的最终厚度。
+- `raw_ok`、`raw_quality_reasons`：校准前的质量判断，不能因为校准而丢失。
+- `thickness_calibration.status`：成功时为 `ok`，超出范围时为 `below_calibration_range` 或 `above_calibration_range`；未启用时为 `disabled`，没有可校准厚度时为 `no_raw_measurement`。
+
+例如 30 mm 标准块原始结果约为 26.08 mm 时，原始质量仍会记录 `reference_error_too_high`，校准后约为 30.00 mm，并通过 `calibration_reference_ok`；原始误差在 `error_mm`，校准后误差在 `calibrated_error_mm`。这两类字段都应保留，便于判断是深度质量问题还是系统偏差。
+
 建议分别测量 10、20、30 mm 左右的方块，并在画面中心和四角重复采样。拍摄时方块不能接触画面边缘，底面要贴合测量面。同一位置的一次采集可用 `--frames 10` 比较帧间稳定性；要比较不同位置，分别执行 `--capture` 并指定不同文件名（`--image`、`--depth`、`--output`）。旧的单帧 NPZ 仍可回放。
 
 新增功能适用于本项目的 OAK-D Lite 双目相机和 DepthAI 3.7.1。默认关闭，使用 --depth 启用。
 
 ## 测量含义与摆放
 
-输出 thickness.thickness_mm 为背壳取样区相对放置平面的垂直高度，单位毫米。
+输出 thickness.thickness_mm 为背壳取样区相对放置平面的未校准垂直高度，单位毫米；启用厚度校准后，业务使用 thickness.reported_thickness_mm。
 程序将毫米深度反投影到三维，在检测框外拟合支撑平面，再计算中央背壳区域点到平面的距离，取第 90 百分位，降低孤立噪点影响。
 这不是腹壳与背壳两面的直接测量。腹部悬空、腿撑起身体或托盘背景高度不同都会使结果偏离身体实际厚度。
 
@@ -50,6 +92,7 @@ python test_depth_block.py --depth block_depth.npz --bbox 250 260 380 390 --heig
 python oak_crab_measure.py \
   --blob oak_export/best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob \
   --depth --frame-count 5 \
+  --thickness-calibration depth_thickness_calibration.json \
   --json-out measurement_depth.json \
   --depth-out depth_sample.npz \
   --debug-image depth_debug.jpg
@@ -59,15 +102,15 @@ python oak_crab_measure.py \
 
 ## 流水线与上传
 
-给原有 python crab_pipeline.py 命令追加 --depth，或执行 bash run_once.sh --depth。
-连续运行可以直接在 crab_pipeline.py 上组合 --loop --interval 30 --depth。
-把新增 crab_thickness.py 与修改后的脚本一起部署到板子。
+给原有 python crab_pipeline.py 命令追加 --depth 和 --thickness-calibration depth_thickness_calibration.json，或执行 bash run_once.sh --depth --thickness-calibration depth_thickness_calibration.json。
+连续运行可以直接在 crab_pipeline.py 上组合 --loop --interval 30 --depth --thickness-calibration depth_thickness_calibration.json。
+把新增 crab_thickness.py、thickness_calibration.py、depth_thickness_calibration.json 与修改后的脚本一起部署到板子。
 流水线会保存 runs/depth_时间戳.npz，测量 JSON 和 pipeline JSON 包含 thickness。
 NPZ 包含 depth_mm 和 intrinsics，分别为对齐到识别 ROI 的原始深度与对应的 3x3 内参。
 深度文件保存在本地，沿用原有 --keep 文件轮换，不会自动上传深度文件。
 
 启用深度上传前，在 OneNET 物模型新增 thickness_ok（int32，0/1）和 thickness_mm（float，毫米）。
-只有成功测量才上报 thickness_mm；失败时上报 thickness_ok=0，不发送伪造的零厚度。
+启用校准时，OneNET 的 thickness_mm 使用 reported_thickness_mm；只有成功测量才上报厚度，失败时上报 thickness_ok=0，不发送伪造的零厚度。
 云端可能保留上一次 thickness_mm，因此必须结合 thickness_ok 判断有效性。
 未启用 --depth 时不会添加这些 MQTT 属性。RS485 二进制包保持原协议，不包含厚度。
 
@@ -79,7 +122,9 @@ NPZ 包含 depth_mm 和 intrinsics，分别为对齐到识别 ROI 的原始深�
 - support_not_planar：背景不满足单一平面条件。
 - insufficient_shell_depth：背壳取样区有效深度不足。
 - shell_not_separated_from_support：背壳高度未明显超过平面噪声。
+- thickness_below_depth_resolution：背壳高度低于当前深度分辨率，不能可靠区分支撑平面。
 - height_out_of_range：高度超出 --depth-max-height-mm（默认 150）。
+- thickness_calibration_out_of_range：原始厚度超出校准配置范围，禁止外推。
 
 默认平面内点阈值为 --depth-plane-tolerance-mm 3，背壳有效比例至少 60%，支撑平面内点比例至少 70%。
 RGB、推理和深度采用时间同步，允许最大 40 毫秒差；30 秒无法取得同步帧则报错。
@@ -99,6 +144,7 @@ RGB、推理和深度采用时间同步，允许最大 40 毫秒差；30 秒无�
     python -m unittest discover -s tests -v
     python oak_crab_measure.py --help
     python crab_pipeline.py --help
+    python calibrate_thickness.py --help
 
 没有设备时可以验证算法、参数、上传队列和自动触发状态机；真实双目误差、RGB 深度对齐误差、反光表面有效率和相机掉线恢复需要设备到位后验证。
 
@@ -106,7 +152,8 @@ RGB、推理和深度采用时间同步，允许最大 40 毫秒差；30 秒无�
 
     请在当前 Crab_Identification 项目上进行 OAK-D Lite 实机验证。
     先检查相机型号、RGB 与左右双目流、DepthAI 版本和运行日志。
-    使用已知高度 10、20、30、50 mm 的哑光标准块，在放置区域中心及四角分别采集至少 10 次。
+    使用已知高度 10、20、30 mm 的哑光标准块，在放置区域中心及四角分别采集至少 10 次；有 50 mm 标准块时再增加该高度。
+    10 mm 主要用于确认深度分辨率，不要把无效的 10 mm 结果用于校准；当前校准配置先使用 20 mm 和 30 mm。
     记录 thickness_mm、plane_rmse_mm、plane_inlier_ratio、valid_depth_ratio 和 timestamp_delta_ms。
     计算每个高度和位置的平均误差、最大绝对误差、标准差、CV、P95 误差。
     再使用至少 10 只真实螃蟹，用卡尺测量背壳高度并与程序值配对。
