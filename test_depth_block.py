@@ -11,6 +11,69 @@ import numpy as np
 from crab_thickness import measure_thickness
 
 
+def summarize_frame_results(frame_results, expected_height_mm, min_valid_ratio,
+                            max_frame_spread_mm, max_error_mm):
+    successful = [row for row in frame_results if row["ok"]]
+    frame_count = len(frame_results)
+    required = max(1, int(np.ceil(frame_count * min_valid_ratio)))
+    values = np.asarray([row["thickness_mm"] for row in successful], dtype=float)
+    reasons = []
+    if len(successful) < required:
+        reasons.append("insufficient_valid_frames")
+
+    result = {
+        "ok": False,
+        "reason": "pending",
+        "quality_reasons": reasons,
+        "unit": "mm",
+        "frame_count": frame_count,
+        "valid_frame_count": len(successful),
+        "required_valid_frames": required,
+        "valid_frame_ratio": len(successful) / frame_count if frame_count else 0.0,
+        "thickness_mm": None,
+        "mean_thickness_mm": None,
+        "median_thickness_mm": None,
+        "mad_mm": None,
+        "std_mm": None,
+        "range_mm": None,
+        "valid_depth_ratio": None,
+        "plane_inlier_ratio": None,
+        "plane_rmse_mm": None,
+    }
+    if values.size:
+        median = float(np.median(values))
+        deviations = np.abs(values - median)
+        result.update(
+            thickness_mm=median,
+            mean_thickness_mm=float(np.mean(values)),
+            median_thickness_mm=median,
+            mad_mm=float(np.median(deviations)),
+            std_mm=float(np.std(values)),
+            range_mm=float(np.ptp(values)),
+            valid_depth_ratio=float(np.median([row["valid_depth_ratio"] for row in successful])),
+            plane_inlier_ratio=float(np.median([row["plane_inlier_ratio"] for row in successful])),
+            plane_rmse_mm=float(np.median([row["plane_rmse_mm"] for row in successful])),
+        )
+        if result["range_mm"] > max_frame_spread_mm:
+            reasons.append("frame_spread_too_large")
+        if expected_height_mm is not None:
+            error = median - expected_height_mm
+            result.update(
+                expected_height_mm=expected_height_mm,
+                error_mm=float(error),
+                absolute_error_mm=float(abs(error)),
+            )
+            if abs(error) > max_error_mm:
+                reasons.append("reference_error_too_high")
+    else:
+        result["expected_height_mm"] = expected_height_mm
+
+    result["quality_reasons"] = reasons
+    result["reason"] = "ok" if not reasons else ";".join(reasons)
+    result["ok"] = not reasons
+    return result
+
+
 def capture(args):
     import depthai as dai
     import cv2
@@ -106,31 +169,19 @@ def analyze(args):
         if delta is not None:
             row['timestamp_delta_ms'] = float(delta[index])
         frame_results.append(row)
-    successful = [row for row in frame_results if row['ok']]
-    heights = np.asarray([row['thickness_mm'] for row in successful], dtype=float)
-    required = max(1, int(np.ceil(len(frame_results) * .8)))
-    ok = len(successful) >= required
-    result = {
-        'ok': ok,
-        'reason': 'ok' if ok else 'insufficient_valid_frames',
+    result = summarize_frame_results(
+        frame_results,
+        args.height_mm,
+        args.min_valid_ratio,
+        args.max_frame_spread_mm,
+        args.max_error_mm,
+    )
+    result.update({
         'unit': 'mm',
         'bbox_xyxy': args.bbox,
-        'expected_height_mm': args.height_mm,
         'depth_file': str(args.depth),
-        'frame_count': len(frame_results),
-        'valid_frame_count': len(successful),
-        'required_valid_frames': required,
-        'thickness_mm': float(np.mean(heights)) if ok else None,
-        'std_mm': float(np.std(heights)) if ok else None,
-        'range_mm': float(np.ptp(heights)) if ok else None,
-        'valid_depth_ratio': float(np.mean([row['valid_depth_ratio'] for row in successful])) if ok else None,
-        'plane_inlier_ratio': float(np.mean([row['plane_inlier_ratio'] for row in successful])) if ok else None,
-        'plane_rmse_mm': float(np.mean([row['plane_rmse_mm'] for row in successful])) if ok else None,
         'frames': frame_results,
-    }
-    if ok and args.height_mm is not None:
-        result['error_mm'] = result['thickness_mm'] - args.height_mm
-        result['absolute_error_mm'] = abs(result['error_mm'])
+    })
     report = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)
     args.output.write_text(report + '\n', encoding='utf-8')
     print(report)
@@ -149,6 +200,12 @@ def main():
     parser.add_argument('--body-scale', type=float, default=.35)
     parser.add_argument('--max-height-mm', type=float, default=150.)
     parser.add_argument('--plane-tolerance-mm', type=float, default=3.)
+    parser.add_argument('--min-valid-ratio', type=float, default=.8,
+                        help='Minimum fraction of valid frames required')
+    parser.add_argument('--max-frame-spread-mm', type=float, default=5.,
+                        help='Maximum valid-frame thickness range')
+    parser.add_argument('--max-error-mm', type=float, default=2.,
+                        help='Maximum error against --height-mm')
     parser.add_argument('--frames', type=int, default=5)
     parser.add_argument('--warmup-frames', type=int, default=15,
                         help='Discard initial synchronized frames while stereo depth settles')
@@ -163,6 +220,16 @@ def main():
         parser.error('Invalid frame count or camera size')
     if not 0 < args.roi_scale <= 1 or not 0 <= args.roi_center_x <= 1 or not 0 <= args.roi_center_y <= 1:
         parser.error('Invalid ROI settings')
+    if not 0 < args.body_scale <= 1 or not np.isfinite(args.max_height_mm) or args.max_height_mm <= 0:
+        parser.error('Invalid body scale or maximum height')
+    if not 0 < args.plane_tolerance_mm or not np.isfinite(args.plane_tolerance_mm):
+        parser.error('--plane-tolerance-mm must be finite and positive')
+    if not 0 < args.min_valid_ratio <= 1 or not np.isfinite(args.min_valid_ratio):
+        parser.error('--min-valid-ratio must be in (0, 1]')
+    if not np.isfinite(args.max_frame_spread_mm) or args.max_frame_spread_mm <= 0:
+        parser.error('--max-frame-spread-mm must be finite and positive')
+    if not np.isfinite(args.max_error_mm) or args.max_error_mm <= 0:
+        parser.error('--max-error-mm must be finite and positive')
     if args.height_mm is not None and (not np.isfinite(args.height_mm) or args.height_mm <= 0):
         parser.error('--height-mm must be positive')
     if args.capture:

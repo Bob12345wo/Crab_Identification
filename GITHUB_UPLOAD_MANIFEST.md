@@ -11,9 +11,17 @@ requirements.txt
 GITHUB_UPLOAD_MANIFEST.md
 oak_crab_measure.py
 crab_thickness.py
+test_depth_block.py
+replay_depth.py
+upload_queue.py
+weight_trigger.py
 DEPTH_MEASUREMENT.md
 tests/test_crab_thickness.py
 tests/test_depth_integration.py
+tests/test_pose_quality.py
+tests/test_block_depth_cli.py
+DEVELOPMENT_LOG.md
+OPTIMIZATION_ROADMAP.md
 crab_pipeline.py
 read_weight_modbus.py
 onenet_mqtt_upload.py
@@ -73,5 +81,3 @@ rg -n "device_key|file_access_key|Secret|Access" .
 ```
 
 `PUT_...` 占位符可以保留；真实密钥不能提交。如果命中了 `onenet_mqtt_config.example.json` 里的占位字段是正常的，重点检查是否出现真实设备密钥或真实访问密钥。
-replay_depth.py
-DEVELOPMENT_LOG.md

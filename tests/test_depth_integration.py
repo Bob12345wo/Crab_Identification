@@ -26,7 +26,9 @@ class DepthIntegrationTests(unittest.TestCase):
     def run_measure(self, directory, enabled):
         output = Path(directory) / 'result.json'
         archive = Path(directory) / 'depth.npz'
-        argv = ['measure', '--json-out', str(output)]
+        blob = Path(directory) / 'model.blob'
+        blob.write_bytes(b'test')
+        argv = ['measure', '--blob', str(blob), '--json-out', str(output)]
         if enabled:
             argv += ['--depth', '--depth-out', str(archive)]
         pose = {'ok': True, 'score': 0.9, 'bbox_xyxy': [55, 55, 145, 145],

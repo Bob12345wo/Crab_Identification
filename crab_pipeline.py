@@ -187,7 +187,14 @@ def run_once(args: argparse.Namespace) -> Path:
 def build_parser():
     parser = argparse.ArgumentParser(description="Run crab OAK measurement, weight read, and OneNET MQTT upload.")
     add_depth_arguments(parser)
-    parser.add_argument("--blob", default="crab_pose_best_openvino_2022.1_4shave.blob")
+    parser.add_argument(
+        "--blob",
+        default=(
+            "oak_export/best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob"
+            if Path("oak_export/best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob").is_file()
+            else "best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob"
+        ),
+    )
     parser.add_argument("--input-size", type=int, default=640)
     parser.add_argument("--frame-count", type=int, default=5)
     parser.add_argument("--camera-source-size", type=int, default=1920)

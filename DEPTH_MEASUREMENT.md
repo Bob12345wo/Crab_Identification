@@ -24,7 +24,8 @@ python test_depth_block.py --capture
 python test_depth_block.py --depth block_depth.npz --bbox 250 260 380 390 --height-mm 20.3
 ```
 
-结果保存在 `block_result.json`：`thickness_mm` 是有效帧估计高度的平均值，`error_mm` 是相对卡尺读数的误差，`std_mm` 和 `range_mm` 是同一次采集的帧间波动，`valid_depth_ratio` 是方块中央采样区平均有效深度比例，`plane_inlier_ratio` 和 `plane_rmse_mm` 反映周围平面质量。`frames` 列出每一帧的结果，至少 80% 帧有效才会给出 `ok=true` 和平均高度。若 `ok=false`，先检查每帧 `reason`，不要直接放宽阈值。这里的中央取样区默认占方块外接框宽高的 35%，可用 `--body-scale` 调整；测试方块时应确保该区域完全落在方块平坦顶面。
+结果保存在 `block_result.json`：`thickness_mm` 是有效帧估计高度的中位数，`error_mm` 是相对卡尺读数的误差，`std_mm` 和 `range_mm` 是同一次采集的帧间波动，`valid_depth_ratio` 是方块中央采样区平均有效深度比例，`plane_inlier_ratio` 和 `plane_rmse_mm` 反映周围平面质量。`frames` 列出每一帧的结果，至少 80% 帧有效才会给出有效汇总高度。若 `ok=false`，先检查每帧 `reason`，不要直接放宽阈值。这里的中央取样区默认占方块外接框宽高的 35%，可用 `--body-scale` 调整；测试方块时应确保该区域完全落在方块平坦顶面。
+`thickness_mm` 使用有效帧中位数，`mean_thickness_mm` 保留均值用于诊断；默认要求至少 80% 帧有效、有效帧极差不超过 5 mm、与 `--height-mm` 的误差不超过 2 mm。误差超限时仍会保存厚度值，并将 `reason` 标为 `reference_error_too_high`，便于定位系统误差。
 
 建议分别测量 10、20、30 mm 左右的方块，并在画面中心和四角重复采样。拍摄时方块不能接触画面边缘，底面要贴合测量面。同一位置的一次采集可用 `--frames 10` 比较帧间稳定性；要比较不同位置，分别执行 `--capture` 并指定不同文件名（`--image`、`--depth`、`--output`）。旧的单帧 NPZ 仍可回放。
 

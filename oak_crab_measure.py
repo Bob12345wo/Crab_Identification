@@ -34,6 +34,16 @@ LEG_DEFS = [
 ]
 
 CLAW_NAMES = {"L-Claw", "R-Claw"}
+MODEL_FILENAME = "best_yolo_rgb_scale255_imgsz640_openvino_2022.1_4shave.blob"
+
+
+def default_blob_path() -> str:
+    candidates = (
+        Path("oak_export") / MODEL_FILENAME,
+        Path(MODEL_FILENAME),
+        Path("crab_pose_best_openvino_2022.1_4shave.blob"),
+    )
+    return str(next((path for path in candidates if path.is_file()), candidates[0]))
 
 
 def xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
@@ -53,6 +63,8 @@ def box_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou_thres: float) -> list[int]:
+    if len(boxes) == 0:
+        return []
     order = scores.argsort()[::-1]
     keep = []
     while order.size:
@@ -66,22 +78,38 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_thres: float) -> list[int]:
 
 
 def decode_pose(output: np.ndarray, conf_thres: float, iou_thres: float, input_size: int) -> dict | None:
-    # output shape: (149, 8400), rows are [cx, cy, w, h, cls_conf, kpt0_x, kpt0_y, kpt0_conf, ...]
-    pred = output.T
+    # YOLO pose output is normally (149, N), but accept (N, 149) and a
+    # single leading batch dimension so a blob change fails with a reason.
+    raw = np.asarray(output, dtype=np.float32)
+    if raw.ndim == 3 and raw.shape[0] == 1:
+        raw = raw[0]
+    if raw.ndim != 2:
+        return {"ok": False, "reason": "invalid_pose_tensor_shape", "shape": list(raw.shape)}
+    if raw.shape[0] == 149:
+        pred = raw.T
+    elif raw.shape[1] == 149:
+        pred = raw
+    else:
+        return {"ok": False, "reason": "unexpected_pose_tensor_channels", "shape": list(raw.shape)}
+
     scores = pred[:, 4]
-    mask = scores >= conf_thres
+    finite = np.isfinite(pred).all(axis=1)
+    mask = finite & (scores >= conf_thres)
     if not np.any(mask):
-        best = int(np.argmax(scores))
+        finite_scores = np.where(np.isfinite(scores), scores, -np.inf)
+        best = int(np.argmax(finite_scores))
         return {
             "ok": False,
             "reason": "no_detection_above_threshold",
-            "best_score": float(scores[best]),
+            "best_score": None if not np.isfinite(finite_scores[best]) else float(finite_scores[best]),
         }
 
     pred = pred[mask]
     scores = pred[:, 4]
     boxes_xyxy = xywh_to_xyxy(pred[:, :4])
     keep = nms(boxes_xyxy, scores, iou_thres)
+    if not keep:
+        return {"ok": False, "reason": "nms_removed_all_detections"}
     best_idx = keep[0]
     best = pred[best_idx]
 
@@ -96,6 +124,7 @@ def decode_pose(output: np.ndarray, conf_thres: float, iou_thres: float, input_s
         "bbox_xyxy": boxes_xyxy[best_idx].clip(0, input_size - 1).tolist(),
         "keypoints": kpts.tolist(),
         "detections_after_conf": int(len(pred)),
+        "detections_after_nms": int(len(keep)),
     }
 
 
@@ -104,8 +133,8 @@ def load_homography(path: str | None, expected_camera: dict | None = None) -> np
         return None
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     quality = data.get("quality")
-    if quality is not None and not quality.get("ok", False):
-        raise RuntimeError(f"Calibration quality is not valid: {quality.get('reasons', [])}")
+    if not isinstance(quality, dict) or not quality.get("ok", False):
+        raise RuntimeError(f"Calibration quality is not valid: {(quality or {}).get('reasons', ['missing_quality'])}")
     if expected_camera is not None and data.get("camera"):
         calibrated_camera = data["camera"]
         mismatches = []
@@ -124,15 +153,23 @@ def load_homography(path: str | None, expected_camera: dict | None = None) -> np
             raise RuntimeError(
                 "Calibration does not match the current camera/ROI settings: " + ", ".join(mismatches)
             )
-    return np.array(data["pixel_to_mm_homography"], dtype=np.float64)
+    homography = np.asarray(data.get("pixel_to_mm_homography"), dtype=np.float64)
+    if homography.shape != (3, 3) or not np.isfinite(homography).all() or abs(np.linalg.det(homography)) < 1e-12:
+        raise RuntimeError("Calibration homography is missing, non-finite, or singular")
+    return homography
 
 
 def transform_points(points: np.ndarray, homography: np.ndarray) -> np.ndarray:
+    homography = np.asarray(homography, dtype=np.float64)
+    if homography.shape != (3, 3) or not np.isfinite(homography).all():
+        raise ValueError("Invalid homography")
     pts = points.astype(np.float64).reshape(-1, 1, 2)
     out = np.empty((len(points), 2), dtype=np.float64)
     for i, p in enumerate(pts):
         x, y = p[0]
         den = homography[2, 0] * x + homography[2, 1] * y + homography[2, 2]
+        if abs(den) < 1e-12 or not np.isfinite(den):
+            raise ValueError("Homography maps a point to infinity")
         out[i, 0] = (homography[0, 0] * x + homography[0, 1] * y + homography[0, 2]) / den
         out[i, 1] = (homography[1, 0] * x + homography[1, 1] * y + homography[1, 2]) / den
     return out
@@ -183,6 +220,7 @@ def assess_pose_quality(
     max_bbox_area: float,
     max_bbox_aspect: float,
     max_outside_kpts: int,
+    kpt_conf: float = 0.3,
 ) -> dict:
     if not pose or not pose.get("ok"):
         reason = "no_pose" if not pose else pose.get("reason", "pose_decode_failed")
@@ -190,7 +228,11 @@ def assess_pose_quality(
 
     reasons = []
     score = float(pose["score"])
-    x1, y1, x2, y2 = [float(v) for v in pose["bbox_xyxy"]]
+    bbox = np.asarray(pose.get("bbox_xyxy", []), dtype=np.float64)
+    kpts = np.asarray(pose.get("keypoints", []), dtype=np.float32)
+    if bbox.shape != (4,) or kpts.shape != (48, 3) or not np.isfinite(bbox).all() or not np.isfinite(kpts).all():
+        return {"ok": False, "reasons": ["invalid_pose_geometry"]}
+    x1, y1, x2, y2 = [float(v) for v in bbox]
     w = max(0.0, x2 - x1)
     h = max(0.0, y2 - y1)
     area_ratio = (w * h) / float(input_size * input_size)
@@ -204,14 +246,21 @@ def assess_pose_quality(
         reasons.append(f"bbox_too_large:{area_ratio:.3f}> {max_bbox_area:.3f}")
     if aspect > max_bbox_aspect:
         reasons.append(f"bbox_aspect_extreme:{aspect:.2f}> {max_bbox_aspect:.2f}")
+    if x2 <= x1 or y2 <= y1:
+        reasons.append("invalid_bbox_dimensions")
+    if x1 <= 0 or y1 <= 0 or x2 >= input_size or y2 >= input_size:
+        reasons.append("bbox_touches_model_edge")
 
-    kpts = np.array(pose["keypoints"], dtype=np.float32)
     margin = 0.03 * input_size
+    visible = kpts[:, 2] >= kpt_conf
     outside = np.sum(
+        visible
+        & (
         (kpts[:, 0] < x1 - margin)
         | (kpts[:, 0] > x2 + margin)
         | (kpts[:, 1] < y1 - margin)
         | (kpts[:, 1] > y2 + margin)
+        )
     )
     if int(outside) > max_outside_kpts:
         reasons.append(f"too_many_keypoints_outside_bbox:{int(outside)}> {max_outside_kpts}")
@@ -223,6 +272,7 @@ def assess_pose_quality(
         "bbox_area_ratio": area_ratio,
         "bbox_aspect": aspect,
         "keypoints_outside_bbox": int(outside),
+        "visible_keypoints": int(np.count_nonzero(visible)),
     }
 
 
@@ -470,6 +520,14 @@ def run_oak_frames(
         img_out.link(nn.input)
 
         queue_size = max(2, min(int(frame_count), 8))
+        sync = pipeline.create(dai.node.Sync)
+        sync.setSyncThreshold(timedelta(milliseconds=40))
+        sync.setSyncAttempts(-1)
+        # Always consume RGB and NN output as one synchronized group. Reading
+        # two independent queues can pair a frame with the wrong inference
+        # after a USB or NN scheduling delay.
+        nn.passthrough.link(sync.inputs["rgb"])
+        nn.out.link(sync.inputs["nn"])
         if depth_frames is not None:
             left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
             right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
@@ -482,24 +540,17 @@ def run_oak_frames(
             right.requestOutput((640, 400), dai.ImgFrame.Type.GRAY8, fps=5.0).link(stereo.right)
             img_out.link(stereo.inputAlignTo)
             stereo.setOutputSize(input_size, input_size)
-            sync = pipeline.create(dai.node.Sync)
-            sync.setSyncThreshold(timedelta(milliseconds=40))
-            sync.setSyncAttempts(-1)
-            nn.passthrough.link(sync.inputs["rgb"])
-            nn.out.link(sync.inputs["nn"])
             stereo.depth.link(sync.inputs["depth"])
-            sync_q = sync.out.createOutputQueue(maxSize=queue_size, blocking=False)
-        else:
-            img_q = nn.passthrough.createOutputQueue(maxSize=queue_size, blocking=True)
-            q = nn.out.createOutputQueue(maxSize=queue_size, blocking=True)
+        sync_q = sync.out.createOutputQueue(maxSize=queue_size, blocking=False)
         pipeline.start()
         frames = []
         for _ in range(max(1, int(frame_count))):
             deadline = time.monotonic() + capture_timeout
+            group = wait_for_message(sync_q, deadline)
+            rgb, out = group["rgb"], group["nn"]
+            frame = rgb.getCvFrame()
             if depth_frames is not None:
-                group = wait_for_message(sync_q, deadline)
-                rgb, out, depth_msg = group["rgb"], group["nn"], group["depth"]
-                frame = rgb.getCvFrame()
+                depth_msg = group["depth"]
                 depth = depth_msg.getFrame()
                 if depth.shape != frame.shape[:2]:
                     raise RuntimeError("Aligned depth dimensions do not match inference image")
@@ -508,11 +559,7 @@ def run_oak_frames(
                     "intrinsics": np.asarray(rgb.getTransformation().getIntrinsicMatrix()),
                     "timestamp_delta_ms": abs((rgb.getTimestamp() - depth_msg.getTimestamp()).total_seconds()) * 1000,
                 })
-            else:
-                frame = wait_for_message(img_q, deadline).getCvFrame()
-                out = wait_for_message(q, deadline)
-            tensor = out.getTensor(out.getAllLayerNames()[0])
-            output = np.asarray(tensor[0] if tensor.ndim == 3 else tensor, dtype=np.float32)
+            output = read_nn_output(out)
             frames.append((output, frame))
         return frames, {
             "source_size": [source_size, source_size],
@@ -534,12 +581,43 @@ def candidate_rank(candidate: dict) -> tuple:
         kpts = np.array(pose.get("keypoints", []), dtype=np.float32)
         if len(kpts):
             mean_kpt_conf = float(np.mean(kpts[:, 2]))
+    thickness = candidate.get("thickness") or {}
+    depth_ok = 1 if thickness.get("ok") else 0
+    depth_valid_ratio = float(thickness.get("valid_depth_ratio") or 0.0)
+    plane_value = thickness.get("plane_rmse_mm")
+    sync_value = thickness.get("timestamp_delta_ms")
+    plane_rmse = float(plane_value) if plane_value is not None else 9999.0
+    sync_delta = float(sync_value) if sync_value is not None else 9999.0
     return (
         1 if quality.get("ok") else 0,
         reliable_count,
         mean_kpt_conf,
         float(pose.get("score") or pose.get("best_score") or 0.0),
+        depth_ok,
+        depth_valid_ratio,
+        -plane_rmse,
+        -sync_delta,
     )
+
+
+def candidate_selection_key(candidate: dict, use_depth: bool) -> tuple:
+    """Rank complete measurements before confidence-only candidates.
+
+    Depth validity gets priority after pose and leg completeness when enabled,
+    so a visually confident frame with unusable depth cannot win by accident.
+    """
+    rank = candidate_rank(candidate)
+    quality = candidate.get("quality") or {}
+    legs = candidate.get("legs") or []
+    thickness = candidate.get("thickness") or {}
+    complete = bool(
+        quality.get("ok")
+        and (not use_depth or thickness.get("ok"))
+        and sum(1 for leg in legs if leg.get("reliable")) >= candidate.get("required_reliable_legs", 0)
+    )
+    if use_depth:
+        return (complete, rank[0], rank[1], rank[4], rank[5], rank[6], rank[2], rank[3], rank[7])
+    return (complete, rank[0], rank[1], rank[2], rank[3])
 
 
 def save_raw_image(path: str, frame: np.ndarray) -> None:
@@ -548,7 +626,19 @@ def save_raw_image(path: str, frame: np.ndarray) -> None:
     except ImportError as exc:
         raise RuntimeError("Raw image output needs opencv-python installed.") from exc
 
-    cv2.imwrite(path, frame)
+    if not cv2.imwrite(path, frame):
+        raise RuntimeError(f"Failed to save raw image: {path}")
+
+
+def read_nn_output(message) -> np.ndarray:
+    names = list(message.getAllLayerNames())
+    if not names:
+        raise RuntimeError("YOLO NN message contains no output layers")
+    tensor = message.getTensor(names[0])
+    output = np.asarray(tensor[0] if tensor.ndim == 3 else tensor, dtype=np.float32)
+    if output.ndim != 2 or 149 not in output.shape:
+        raise RuntimeError(f"Unexpected YOLO NN tensor shape: {list(output.shape)}")
+    return output
 
 
 def save_debug_image(path: str, frame: np.ndarray, pose: dict | None, kpt_conf: float,
@@ -611,7 +701,7 @@ def main():
     parser.add_argument("--depth-out", help="Save selected aligned depth and intrinsics as NPZ (requires --depth)")
     parser.add_argument("--capture-timeout", type=float, default=30.0, help="Seconds allowed per RGB/NN/depth frame group")
     parser.add_argument("--weight-only", action="store_true", help="Only sample weight; --json-out - emits JSON to stdout")
-    parser.add_argument("--blob", default="crab_pose_best_openvino_2022.1_4shave.blob")
+    parser.add_argument("--blob", default=default_blob_path())
     parser.add_argument("--input-size", type=int, default=640)
     parser.add_argument("--conf", type=float, default=0.25)
     parser.add_argument("--iou", type=float, default=0.5)
@@ -655,6 +745,24 @@ def main():
     parser.add_argument("--weight-min-samples", type=int, default=2)
     args = parser.parse_args()
     validate_depth_arguments(parser, args)
+    if not args.weight_only and not Path(args.blob).is_file():
+        parser.error(f"YOLO blob does not exist: {args.blob}")
+    if args.input_size < 32 or args.camera_source_size < args.input_size:
+        parser.error("camera-source-size must be at least input-size, and input-size must be >= 32")
+    if not 0 <= args.conf <= 1 or not 0 <= args.iou <= 1 or not 0 <= args.kpt_conf <= 1:
+        parser.error("conf, iou and kpt-conf must be in [0, 1]")
+    if not 0 <= args.min_score <= 1 or not 0 < args.min_bbox_area <= args.max_bbox_area <= 1:
+        parser.error("invalid pose quality thresholds")
+    if args.max_bbox_aspect <= 0 or args.max_outside_kpts < 0:
+        parser.error("invalid bbox quality thresholds")
+    if args.max_segment_ratio <= 0 or args.claw_max_segment_ratio <= 0 or args.min_leg_total_px <= 0:
+        parser.error("leg geometry thresholds must be positive")
+    if not 1 <= args.min_reliable_legs <= len(LEG_DEFS):
+        parser.error(f"min-reliable-legs must be in [1, {len(LEG_DEFS)}]")
+    if args.frame_count < 1 or not 0 < args.roi_scale <= 1 or not 0 <= args.roi_center_x <= 1 or not 0 <= args.roi_center_y <= 1:
+        parser.error("invalid frame count or ROI settings")
+    if args.calibration and not Path(args.calibration).is_file():
+        parser.error(f"Calibration file does not exist: {args.calibration}")
     if args.depth_out and not args.depth:
         parser.error("--depth-out requires --depth")
     if not np.isfinite(args.capture_timeout) or args.capture_timeout <= 0:
@@ -720,6 +828,7 @@ def main():
             args.max_bbox_area,
             args.max_bbox_aspect,
             args.max_outside_kpts,
+            args.kpt_conf,
         )
         if pose:
             pose["quality"] = quality
@@ -741,13 +850,10 @@ def main():
                                               args.depth_plane_tolerance_mm)
                 thickness["timestamp_delta_ms"] = sample["timestamp_delta_ms"]
         candidates.append({"index": index, "pose": pose, "quality": quality, "legs": legs,
-                           "frame": frame, "thickness": thickness})
+                           "frame": frame, "thickness": thickness,
+                           "required_reliable_legs": args.min_reliable_legs})
 
-    selected = max(candidates, key=lambda row: (
-        bool(row["quality"].get("ok") and (not args.depth or row["thickness"].get("ok"))
-             and sum(1 for leg in row["legs"] if leg.get("reliable")) >= args.min_reliable_legs),
-        *candidate_rank(row),
-    ))
+    selected = max(candidates, key=lambda row: candidate_selection_key(row, args.depth))
     selected_index = int(selected["index"])
     pose = selected["pose"]
     quality = selected["quality"]
@@ -764,6 +870,7 @@ def main():
             "quality_ok": bool(row["quality"].get("ok")),
             "quality_reasons": row["quality"].get("reasons", []),
             "thickness": row["thickness"],
+            "selection_rank": list(candidate_rank(row)),
             "reliable_leg_count": sum(1 for leg in row["legs"] if leg.get("reliable")),
             "pose_score": float((row.get("pose") or {}).get("score") or (row.get("pose") or {}).get("best_score") or 0.0),
         }
@@ -791,6 +898,10 @@ def main():
                 "reliable_leg_count": int(selected_rank[1]),
                 "mean_keypoint_confidence": float(selected_rank[2]),
                 "pose_score": float(selected_rank[3]),
+                "depth_ok": bool(selected_rank[4]),
+                "depth_valid_ratio": float(selected_rank[5]),
+                "depth_plane_rmse_mm": None if selected_rank[6] <= -9998 else float(-selected_rank[6]),
+                "rgb_depth_delta_ms": None if selected_rank[7] <= -9998 else float(-selected_rank[7]),
             },
             "candidates": candidate_summaries,
         },
