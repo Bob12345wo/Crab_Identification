@@ -1,0 +1,9 @@
+{
+  "labels": 1000,
+  "malformed": [],
+  "missing_points": 0,
+  "out_of_image_points": 0,
+  "outside_box_points": 49,
+  "bbox_width_under_half": 265,
+  "bbox_width_over_eight_tenths": 364
+}

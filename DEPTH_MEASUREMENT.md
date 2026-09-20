@@ -1,5 +1,33 @@
 # OAK 深度与螃蟹厚度测量
 
+## 无螃蟹时测试标准块
+
+用卡尺测量哑光 3D 打印方块的实际高度，并将方块平放在实际测量面上。电脑可通过 USB 直连 OAK 运行此命令；若 OAK 仍接在 Orange Pi 上，则先在板子运行，再把 `block_rgb.jpg` 和 `block_depth.npz` 复制到电脑离线分析。无需 blob、称重模块或 OneNET 配置。
+
+在 Windows 电脑上，把 OAK 的 USB 数据线接到电脑；同一时刻只能由电脑或板子之一打开相机。在本项目目录的 PowerShell 中准备环境：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe test_depth_block.py --capture --frames 10
+```
+
+电脑直连时不需要运行 `run_once.sh`。相机保持在真实测量位置（镜头到放置面可先用约 55 cm），光轴尽量垂直；方块周围保留足够的同一平面。采集时默认丢弃启动后的前 15 组同步帧，待双目深度稳定后再保存 `--frames` 指定的帧数。首次采集成功会得到 `block_rgb.jpg` 和 `block_depth.npz`。如果脚本提示未找到 OAK，先检查数据线、供电和相机是否仍被板子占用。
+
+```bash
+python test_depth_block.py --capture
+```
+
+打开 `block_rgb.jpg`（640 x 640），读出方块外接矩形的像素坐标。方块四周应留有足够的同一平面；不要把盒壁或其他高度的背景框进周围区域。比如方块实际高 20.3 mm、边界为 (250, 260) 到 (380, 390)：
+
+```bash
+python test_depth_block.py --depth block_depth.npz --bbox 250 260 380 390 --height-mm 20.3
+```
+
+结果保存在 `block_result.json`：`thickness_mm` 是有效帧估计高度的平均值，`error_mm` 是相对卡尺读数的误差，`std_mm` 和 `range_mm` 是同一次采集的帧间波动，`valid_depth_ratio` 是方块中央采样区平均有效深度比例，`plane_inlier_ratio` 和 `plane_rmse_mm` 反映周围平面质量。`frames` 列出每一帧的结果，至少 80% 帧有效才会给出 `ok=true` 和平均高度。若 `ok=false`，先检查每帧 `reason`，不要直接放宽阈值。这里的中央取样区默认占方块外接框宽高的 35%，可用 `--body-scale` 调整；测试方块时应确保该区域完全落在方块平坦顶面。
+
+建议分别测量 10、20、30 mm 左右的方块，并在画面中心和四角重复采样。拍摄时方块不能接触画面边缘，底面要贴合测量面。同一位置的一次采集可用 `--frames 10` 比较帧间稳定性；要比较不同位置，分别执行 `--capture` 并指定不同文件名（`--image`、`--depth`、`--output`）。旧的单帧 NPZ 仍可回放。
+
 新增功能适用于本项目的 OAK-D Lite 双目相机和 DepthAI 3.7.1。默认关闭，使用 --depth 启用。
 
 ## 测量含义与摆放

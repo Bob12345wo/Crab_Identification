@@ -1,0 +1,181 @@
+{
+  "ok": false,
+  "reason": "insufficient_valid_frames",
+  "unit": "mm",
+  "bbox_xyxy": [
+    388,
+    215,
+    459,
+    291
+  ],
+  "expected_height_mm": null,
+  "depth_file": "block_depth.npz",
+  "frame_count": 10,
+  "valid_frame_count": 2,
+  "required_valid_frames": 8,
+  "thickness_mm": null,
+  "std_mm": null,
+  "range_mm": null,
+  "valid_depth_ratio": null,
+  "plane_inlier_ratio": null,
+  "plane_rmse_mm": null,
+  "frames": [
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_support_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "frame_index": 0,
+      "timestamp_delta_ms": 1.109
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_support_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "frame_index": 1,
+      "timestamp_delta_ms": 9.468
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_support_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "frame_index": 2,
+      "timestamp_delta_ms": 20.580000000000002
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_support_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "frame_index": 3,
+      "timestamp_delta_ms": 32.129999999999995
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_support_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "frame_index": 4,
+      "timestamp_delta_ms": 30.801
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_support_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "frame_index": 5,
+      "timestamp_delta_ms": 20.222
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "insufficient_shell_depth",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.986,
+      "plane_normal": [
+        -0.0018028462144285605,
+        0.011971467650288201,
+        -0.9999267141685062
+      ],
+      "plane_offset_mm": 560.670673436835,
+      "plane_rmse_mm": 0.9845181581625787,
+      "body_roi_xyxy": [
+        411.075,
+        239.7,
+        435.925,
+        266.3
+      ],
+      "valid_depth_ratio": 0.3333333333333333,
+      "valid_depth_pixels": 216,
+      "frame_index": 6,
+      "timestamp_delta_ms": 9.643
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.97875,
+      "plane_normal": [
+        -0.0023123652063751768,
+        0.026119869847309143,
+        -0.9996561435645318
+      ],
+      "plane_offset_mm": 559.423907459841,
+      "plane_rmse_mm": 1.0560773474558853,
+      "body_roi_xyxy": [
+        411.075,
+        239.7,
+        435.925,
+        266.3
+      ],
+      "valid_depth_ratio": 0.9907407407407407,
+      "valid_depth_pixels": 642,
+      "surface_depth_mm": 558.0,
+      "frame_index": 7,
+      "timestamp_delta_ms": 0.9269999999999999
+    },
+    {
+      "ok": true,
+      "thickness_mm": 7.478923283304764,
+      "reason": "ok",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.978,
+      "plane_normal": [
+        -0.0045471619417334205,
+        0.05279810569973353,
+        -0.9985948544594024
+      ],
+      "plane_offset_mm": 556.0038696617341,
+      "plane_rmse_mm": 1.0602635771494098,
+      "body_roi_xyxy": [
+        411.075,
+        239.7,
+        435.925,
+        266.3
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 648,
+      "surface_depth_mm": 549.0,
+      "frame_index": 8,
+      "timestamp_delta_ms": 11.507
+    },
+    {
+      "ok": true,
+      "thickness_mm": 6.666827223034948,
+      "reason": "ok",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.99375,
+      "plane_normal": [
+        -0.014059850276733288,
+        0.05003461138867821,
+        -0.9986485158820292
+      ],
+      "plane_offset_mm": 555.3129791895727,
+      "plane_rmse_mm": 0.9010429488609932,
+      "body_roi_xyxy": [
+        411.075,
+        239.7,
+        435.925,
+        266.3
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 648,
+      "surface_depth_mm": 548.0,
+      "frame_index": 9,
+      "timestamp_delta_ms": 22.086000000000002
+    }
+  ]
+}

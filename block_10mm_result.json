@@ -1,0 +1,284 @@
+{
+  "ok": false,
+  "reason": "insufficient_valid_frames",
+  "unit": "mm",
+  "bbox_xyxy": [
+    516,
+    411,
+    545,
+    457
+  ],
+  "expected_height_mm": 10.0,
+  "depth_file": "block_depth.npz",
+  "frame_count": 10,
+  "valid_frame_count": 4,
+  "required_valid_frames": 8,
+  "thickness_mm": null,
+  "std_mm": null,
+  "range_mm": null,
+  "valid_depth_ratio": null,
+  "plane_inlier_ratio": null,
+  "plane_rmse_mm": null,
+  "frames": [
+    {
+      "ok": true,
+      "thickness_mm": 7.609965577553806,
+      "reason": "ok",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.9765,
+      "plane_normal": [
+        -0.08411958482119855,
+        -0.029315785971823383,
+        -0.996024337123528
+      ],
+      "plane_offset_mm": 573.6676220230082,
+      "plane_rmse_mm": 1.1306460300841406,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 562.0,
+      "frame_index": 0,
+      "timestamp_delta_ms": 9.08
+    },
+    {
+      "ok": true,
+      "thickness_mm": 7.0060209329515555,
+      "reason": "ok",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.96,
+      "plane_normal": [
+        -0.08118580164549025,
+        -0.026813565147807528,
+        -0.9963382449425713
+      ],
+      "plane_offset_mm": 573.9304233747168,
+      "plane_rmse_mm": 1.149400792132028,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 562.0,
+      "frame_index": 1,
+      "timestamp_delta_ms": 1.49
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.9865,
+      "plane_normal": [
+        -0.08613591503457838,
+        -0.031094753847737078,
+        -0.995798031944382
+      ],
+      "plane_offset_mm": 573.31266007543,
+      "plane_rmse_mm": 1.1505599395860189,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 562.0,
+      "frame_index": 2,
+      "timestamp_delta_ms": 12.07
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.98225,
+      "plane_normal": [
+        -0.08321633233200396,
+        -0.029199430687926742,
+        -0.9961036267782134
+      ],
+      "plane_offset_mm": 573.5258243358198,
+      "plane_rmse_mm": 1.0700120805827744,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 563.0,
+      "frame_index": 3,
+      "timestamp_delta_ms": 22.65
+    },
+    {
+      "ok": true,
+      "thickness_mm": 6.402981500369156,
+      "reason": "ok",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.97025,
+      "plane_normal": [
+        -0.07970302974051312,
+        -0.02820983877223715,
+        -0.9964194056955271
+      ],
+      "plane_offset_mm": 573.3272698614564,
+      "plane_rmse_mm": 1.1039037692875624,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 562.0,
+      "frame_index": 4,
+      "timestamp_delta_ms": 33.224999999999994
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.9785,
+      "plane_normal": [
+        -0.08570430173398941,
+        -0.031039077366999956,
+        -0.9958370089228934
+      ],
+      "plane_offset_mm": 573.4836471524048,
+      "plane_rmse_mm": 1.1676937176798807,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 563.0,
+      "frame_index": 5,
+      "timestamp_delta_ms": 29.728
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.9625,
+      "plane_normal": [
+        -0.07592019620011269,
+        -0.026890718224011123,
+        -0.9967512292855893
+      ],
+      "plane_offset_mm": 573.7760198714675,
+      "plane_rmse_mm": 1.151280689960249,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 563.0,
+      "frame_index": 6,
+      "timestamp_delta_ms": 19.149
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.97425,
+      "plane_normal": [
+        -0.07772960809229701,
+        -0.032574186140246986,
+        -0.9964421861920132
+      ],
+      "plane_offset_mm": 574.0001353296918,
+      "plane_rmse_mm": 1.1394570524583947,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 563.0,
+      "frame_index": 7,
+      "timestamp_delta_ms": 8.571
+    },
+    {
+      "ok": false,
+      "thickness_mm": null,
+      "reason": "shell_not_separated_from_support",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.96325,
+      "plane_normal": [
+        -0.08372650645055192,
+        -0.031210217781358462,
+        -0.9959998967990036
+      ],
+      "plane_offset_mm": 573.7269404084302,
+      "plane_rmse_mm": 1.1737985443242134,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 563.0,
+      "frame_index": 8,
+      "timestamp_delta_ms": 2.0
+    },
+    {
+      "ok": true,
+      "thickness_mm": 6.9036070252591735,
+      "reason": "ok",
+      "method": "support_plane_to_shell_p90",
+      "unit": "mm",
+      "plane_inlier_ratio": 0.96075,
+      "plane_normal": [
+        -0.07786180890469598,
+        -0.02882878253270904,
+        -0.9965472592967031
+      ],
+      "plane_offset_mm": 573.8660793078197,
+      "plane_rmse_mm": 1.1515863601320955,
+      "body_roi_xyxy": [
+        525.425,
+        425.95,
+        535.575,
+        442.05
+      ],
+      "valid_depth_ratio": 1.0,
+      "valid_depth_pixels": 170,
+      "surface_depth_mm": 563.0,
+      "frame_index": 9,
+      "timestamp_delta_ms": 12.579999999999998
+    }
+  ]
+}
