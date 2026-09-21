@@ -123,15 +123,22 @@ def build_topic(config: dict) -> str:
     return f"$sys/{product_id}/{device_name}/{suffix}"
 
 
+def build_request_id(measurement_id: str, image_fid: str) -> str:
+    """Return a stable OneNET message ID within the documented 13-digit limit."""
+    digest = hashlib.sha256(f"{measurement_id}|{image_fid}".encode()).digest()
+    return str(int.from_bytes(digest[:8], "big") % 10_000_000_000_000)
+
+
 def publish_measurement(config, measurement, image_name, image_fid, client_factory=None):
     measurement_id = str(measurement["measurement_id"])
     properties = build_properties(measurement, image_name, image_fid, config.get("payload_style", "value"),
                                   bool(config.get("include_weight_status", False)))
     image_fid = str(image_fid or (measurement.get("image_upload") or {}).get("fid") or "")
     topic = build_topic(config)
-    reply_topics = [f"{topic}/reply", f"{topic}_reply"]
+    # OneNET documents exactly one response topic for a property post.
+    reply_topics = [f"{topic}/reply"]
     # Retries of the same record/image pair reuse the request ID.
-    request_id = str(int(hashlib.sha256(f"{measurement_id}|{image_fid}".encode()).hexdigest()[:15], 16))
+    request_id = build_request_id(measurement_id, image_fid)
     payload = {"id": request_id, "version": "1.0", "params": properties}
     result = {"ok": False, "measurement_id": measurement_id, "image_fid": image_fid,
               "platform_accepted": False, "reply_codes": [], "replies": [],
