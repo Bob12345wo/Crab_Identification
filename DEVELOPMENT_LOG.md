@@ -82,3 +82,5 @@
 - 增加端到端软件回归测试，覆盖测量命令传递校准配置、本地 measurement JSON、上传待处理任务、pipeline manifest 和 MQTT 上传确认。
 - 当前完整软件链路为：OAK 同步采集 -> YOLO Pose 识别 -> 背壳深度测量 -> 厚度校准 -> 质量判定 -> 原图/深度/JSON 保存 -> 上传队列 -> OneNET 文件和 MQTT 属性上传。
 - 自动化测试已增加到 32 项；仍需设备验证真实 OAK 采集、称重、OneNET 网络和真实螃蟹样本。
+- 新增 `PROJECT_HANDOFF.md`，集中记录当前状态、校准适用范围、测试命令、板端部署、OneNET 验收条件和后续设备交接清单。
+- 修正 `run_loop.sh`，现在可使用 `./run_loop.sh 30 --depth --thickness-calibration depth_thickness_calibration.json` 将连续运行和深度参数一起传给主流程。

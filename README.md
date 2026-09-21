@@ -1,6 +1,6 @@
 # 螃蟹腿部识别项目
 
-新增 OAK 双目深度厚度测量：使用 `--depth` 启用，参见 [深度测量与现场验证说明](DEPTH_MEASUREMENT.md)。
+新增 OAK 双目深度厚度测量：使用 `--depth` 启用，参见 [深度测量与现场验证说明](DEPTH_MEASUREMENT.md)。交接和最终验收请参见 [项目交接文档](PROJECT_HANDOFF.md)。
 
 本项目用于在 Orange Pi Zero 3 + OAK-D Lite FF 上完成螃蟹图像采集、YOLO Pose 腿部关键点识别、称重模块读取、毫米/像素腿长计算，并将结果和原始图片上传到 OneNET。
 

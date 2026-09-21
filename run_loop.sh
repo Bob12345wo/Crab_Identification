@@ -4,6 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source .venv/bin/activate
 
+INTERVAL=30
+if [[ $# -gt 0 ]]; then
+  INTERVAL="$1"
+  shift
+fi
+
 CALIBRATION_ARGS=()
 if [[ -f calibration_plane.json ]]; then
   CALIBRATION_ARGS=(--calibration calibration_plane.json)
@@ -34,4 +40,5 @@ python crab_pipeline.py \
   --debug \
   --keep 300 \
   --loop \
-  --interval "${1:-30}"
+  --interval "$INTERVAL" \
+  "$@"

@@ -19,6 +19,7 @@ replay_depth.py
 upload_queue.py
 weight_trigger.py
 DEPTH_MEASUREMENT.md
+PROJECT_HANDOFF.md
 tests/test_crab_thickness.py
 tests/test_thickness_calibration.py
 tests/test_pipeline_chain.py
