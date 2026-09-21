@@ -25,8 +25,11 @@ def validate_depth_arguments(parser, args):
         value = getattr(args, name)
         if not np.isfinite(value) or value <= 0:
             parser.error(f"--{name.replace('_', '-')} must be finite and positive")
-    if args.thickness_calibration and not Path(args.thickness_calibration).is_file():
-        parser.error(f"Thickness calibration file does not exist: {args.thickness_calibration}")
+    if args.thickness_calibration:
+        if not getattr(args, "depth", False):
+            parser.error("--thickness-calibration requires --depth")
+        if not Path(args.thickness_calibration).is_file():
+            parser.error(f"Thickness calibration file does not exist: {args.thickness_calibration}")
 
 
 def measure_thickness(depth, intrinsics, bbox, body_scale=0.35,

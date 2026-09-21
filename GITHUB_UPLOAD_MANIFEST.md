@@ -21,6 +21,7 @@ weight_trigger.py
 DEPTH_MEASUREMENT.md
 tests/test_crab_thickness.py
 tests/test_thickness_calibration.py
+tests/test_pipeline_chain.py
 tests/test_depth_integration.py
 tests/test_pose_quality.py
 tests/test_block_depth_cli.py

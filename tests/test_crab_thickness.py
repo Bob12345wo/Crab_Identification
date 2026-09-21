@@ -1,4 +1,8 @@
 import argparse
+import contextlib
+import io
+from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
@@ -75,6 +79,20 @@ class ThicknessTests(unittest.TestCase):
         args = parser.parse_args(['--depth'])
         validate_depth_arguments(parser, args)
         self.assertTrue(args.depth)
+
+    def test_thickness_calibration_requires_depth(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calibration = Path(directory) / 'calibration.json'
+            calibration.write_text('{}', encoding='utf-8')
+            parser = argparse.ArgumentParser()
+            add_depth_arguments(parser)
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    validate_depth_arguments(
+                        parser,
+                        parser.parse_args(['--thickness-calibration', str(calibration)]),
+                    )
+            self.assertEqual(caught.exception.code, 2)
 
 
 if __name__ == '__main__':
