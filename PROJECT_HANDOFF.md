@@ -176,6 +176,8 @@ pipeline_*.json：file_upload_ok=true，mqtt_upload_ok=true
 measurement_*.json：thickness_ok 对应本次厚度状态
 ```
 
+上传图片名也包含厚度摘要：有效厚度写作 `TH<reported_thickness_mm>mm`，例如 `TH30.0mm`；无有效厚度写作 `THNA`。文件名只用于快速识别，正式数据和失败原因以 measurement JSON 与 OneNET 的 `thickness_ok`、`thickness_mm` 为准。
+
 在 OneNET 控制台确认：
 
 ```text

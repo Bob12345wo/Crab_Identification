@@ -105,6 +105,8 @@ python oak_crab_measure.py \
 给原有 python crab_pipeline.py 命令追加 --depth 和 --thickness-calibration depth_thickness_calibration.json，或执行 bash run_once.sh --depth --thickness-calibration depth_thickness_calibration.json。
 连续运行可以直接在 crab_pipeline.py 上组合 --loop --interval 30 --depth --thickness-calibration depth_thickness_calibration.json。
 把新增 crab_thickness.py、thickness_calibration.py、depth_thickness_calibration.json 与修改后的脚本一起部署到板子。
+
+上传图片文件名包含厚度摘要。厚度通过深度、姿态和校准质量检查时使用 `TH30.0mm` 形式，数值来自最终 `reported_thickness_mm`；深度未启用或厚度无效时使用 `THNA`。`THNA` 表示“没有有效厚度”，不是 0 mm。原始值、校准值和完整失败原因仍保存在 `measurement_*.json`，原始深度保存在 `depth_*.npz`。
 流水线会保存 runs/depth_时间戳.npz，测量 JSON 和 pipeline JSON 包含 thickness。
 NPZ 包含 depth_mm 和 intrinsics，分别为对齐到识别 ROI 的原始深度与对应的 3x3 内参。
 深度文件保存在本地，沿用原有 --keep 文件轮换，不会自动上传深度文件。

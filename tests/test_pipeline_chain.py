@@ -10,6 +10,38 @@ from upload_queue import read_json
 
 
 class PipelineChainTests(unittest.TestCase):
+    def test_compact_image_name_uses_reported_calibrated_thickness(self):
+        name = crab_pipeline.compact_image_name(
+            {
+                'weight': {'weight_g': 20.5},
+                'thickness': {
+                    'ok': True,
+                    'raw_thickness_mm': 26.1,
+                    'reported_thickness_mm': 30.0,
+                },
+                'legs': [],
+            },
+            '20260923_120000_sample',
+        )
+
+        self.assertIn('_W20.5g_TH30.0mm_PX_', name)
+
+    def test_compact_image_name_marks_invalid_thickness_as_na(self):
+        name = crab_pipeline.compact_image_name(
+            {
+                'weight': {'weight_g': 0.0},
+                'thickness': {
+                    'ok': False,
+                    'raw_thickness_mm': 8.0,
+                    'reported_thickness_mm': None,
+                },
+                'legs': [],
+            },
+            '20260923_120000_sample',
+        )
+
+        self.assertIn('_W0.0g_THNA_PX_', name)
+
     def test_depth_calibration_reaches_upload_checkpoint(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

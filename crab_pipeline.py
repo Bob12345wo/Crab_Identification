@@ -48,6 +48,13 @@ def compact_image_name(measurement: dict, stamp: str) -> str:
     weight = measurement.get("weight") or {}
     weight_value = weight.get("weight_g")
     weight_label = "NA" if weight_value is None else f"{float(weight_value):.1f}g"
+    thickness = measurement.get("thickness") or {}
+    reported_thickness = thickness.get("reported_thickness_mm", thickness.get("thickness_mm"))
+    thickness_label = (
+        f"TH{float(reported_thickness):.1f}mm"
+        if thickness.get("ok") and reported_thickness is not None
+        else "THNA"
+    )
     legs = {row.get("leg"): row for row in measurement.get("legs", [])}
     unit = "MM" if any(row.get("total_mm") is not None for row in legs.values()) else "PX"
     value_key = "total_mm" if unit == "MM" else "total_px"
@@ -61,7 +68,7 @@ def compact_image_name(measurement: dict, stamp: str) -> str:
         quality_bits.append("1" if row.get("reliable") else "0")
 
     quality = "".join(quality_bits)
-    return f"crab_{stamp}_W{weight_label}_{unit}_{'_'.join(values)}_Q{quality}.jpg"
+    return f"crab_{stamp}_W{weight_label}_{thickness_label}_{unit}_{'_'.join(values)}_Q{quality}.jpg"
 
 
 def timestamp_name(prefix: str, suffix: str) -> str:
